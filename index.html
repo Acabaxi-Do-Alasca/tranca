@@ -1,0 +1,1388 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tranca</title>
+<style>
+  :root {
+    --bg: #1f2430;
+    --panel: #2a3040;
+    --text: #e8e6e1;
+    --muted: #9aa0b0;
+    --accent: #f2b84b;
+    --wood: #5b3a22;
+    --cw: clamp(44px, 5.4vw, 78px);  /* cartas da mão */
+    --mw: clamp(32px, 3.5vw, 52px);  /* cartas dos jogos baixados */
+    --ow: clamp(22px, 2.4vw, 36px);  /* mão do adversário */
+    --pw: clamp(42px, 4.6vw, 66px);  /* monte, morto e lixo */
+  }
+  [hidden] { display: none !important; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: flex; align-items: center; justify-content: center; padding: 16px;
+  }
+  .app { display: flex; gap: 24px; justify-content: center; align-items: flex-start; width: 100%; max-width: 1340px; }
+
+  /* ===== Mesa ===== */
+  .table {
+    position: relative; flex: 1; min-width: 0; max-width: 1000px;
+    min-height: min(860px, calc(100vh - 32px));
+    display: flex; flex-direction: column; gap: 8px; padding: 14px 16px 12px;
+    background: radial-gradient(ellipse at 50% 45%, #2f8a57 0%, #1c623d 55%, #11402a 100%);
+    border: 10px solid var(--wood); border-radius: 22px;
+    box-shadow: 0 12px 34px rgba(0,0,0,.55), inset 0 0 60px rgba(0,0,0,.35);
+    user-select: none; -webkit-user-select: none;
+  }
+  .seat-info { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; font-size: 13px; min-height: 26px; }
+  .seat-info .nm { font-weight: 700; font-size: 15px; display: inline-flex; align-items: center; gap: 6px; }
+  .seat-info .nm::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: rgba(255,255,255,.25); }
+  .seat-info .nm.turn::before { background: var(--accent); box-shadow: 0 0 0 0 rgba(242,184,75,.7); animation: ping 1.4s infinite; }
+  @keyframes ping { 70% { box-shadow: 0 0 0 8px rgba(242,184,75,0); } 100% { box-shadow: 0 0 0 0 rgba(242,184,75,0); } }
+  .pill { background: rgba(0,0,0,.28); border-radius: 999px; padding: 3px 9px; color: #d6e6dc; white-space: nowrap; }
+  .pill.ok { background: rgba(80,200,120,.25); color: #c9f5d6; }
+  .pill.gold { background: rgba(242,184,75,.25); color: #ffe2a6; }
+  .seat-info .pts { margin-left: auto; font-weight: 700; color: var(--accent); }
+  .r3 { display: inline-flex; gap: 3px; --w: calc(var(--ow) * .85); }
+
+  .fan { display: flex; justify-content: center; align-items: flex-end; }
+  .fan > .card + .card { margin-left: var(--ov, 0px); }
+  #oppHand { --w: var(--ow); min-height: calc(var(--ow) * 1.4); }
+
+  .melds {
+    --w: var(--mw);
+    display: flex; flex-wrap: wrap; align-content: flex-start; gap: 12px 16px;
+    min-height: calc(var(--mw) * 1.4 + 28px); padding: 8px 10px 14px; flex: 1;
+    border-radius: 12px; background: rgba(0,0,0,.12); border: 1px dashed rgba(255,255,255,.1);
+  }
+  .melds .empty { color: rgba(255,255,255,.35); font-size: 13px; align-self: center; margin: auto; }
+  .meld { position: relative; display: flex; border-radius: 8px; transition: transform .15s; }
+  .meld > .card + .card { margin-left: calc(var(--mw) * -.66); }
+  .meld .mc {
+    position: absolute; left: 50%; bottom: -11px; transform: translateX(-50%); white-space: nowrap;
+    font-size: 10px; font-weight: 700; background: rgba(0,0,0,.6); color: #fff; border-radius: 999px; padding: 1px 7px; z-index: 3;
+  }
+  .meld.clean .mc { background: var(--accent); color: #2a1e05; }
+  .meld.dirty .mc { background: #b9c2cf; color: #1d2430; }
+  .meld.clean { box-shadow: 0 0 0 2px var(--accent), 0 0 18px rgba(242,184,75,.55); }
+  .meld.dirty { box-shadow: 0 0 0 2px #b9c2cf, 0 0 12px rgba(200,210,225,.35); }
+  .meld.can-add { cursor: pointer; outline: 2px dashed var(--accent); outline-offset: 4px; animation: glow 1.2s ease-in-out infinite; }
+  .meld.can-add:hover { transform: translateY(-3px); }
+  .meld.pop { animation: canastra .9s ease-out; }
+  @keyframes glow { 50% { outline-color: rgba(242,184,75,.25); } }
+  @keyframes canastra { 0% { transform: scale(1); } 30% { transform: scale(1.12); } 100% { transform: scale(1); } }
+
+  .center { display: flex; align-items: center; justify-content: center; gap: clamp(10px, 2.4vw, 28px); padding: 4px 0; }
+  .pile { display: flex; flex-direction: column; align-items: center; gap: 4px; --w: var(--pw); }
+  .pbody { position: relative; width: var(--pw); height: calc(var(--pw) * 1.4); }
+  #mortoBody { width: calc(var(--pw) * 1.3); }
+  #mortoBody .card { position: absolute; top: 0; }
+  #mortoBody .card:nth-child(2) { left: calc(var(--pw) * .3); top: 4px; transform: rotate(6deg); }
+  .plabel { font-size: 12px; color: #d6e6dc; letter-spacing: .03em; }
+  .plabel b { color: #fff; }
+  .slot { width: var(--pw); height: calc(var(--pw) * 1.4); border-radius: 8px; border: 2px dashed rgba(255,255,255,.25); }
+  #stockPile.can-take { cursor: pointer; }
+  #stockPile.can-take .pbody .card { animation: nudge 1.6s ease-in-out infinite; box-shadow: 0 0 0 3px var(--accent), 2px 2px 0 #ccc, 4px 4px 0 #bbb, 0 8px 16px rgba(0,0,0,.4); }
+  @keyframes nudge { 50% { transform: translateY(-4px); } }
+  .card.stack { box-shadow: 1px 1px 0 #ddd, 2px 2px 0 #bbb, 3px 3px 0 #ddd, 4px 4px 0 #aaa, 0 8px 16px rgba(0,0,0,.4); }
+
+  .lixo { display: flex; flex-direction: column; align-items: center; gap: 4px; flex: 0 1 46%; min-width: calc(var(--pw) * 2); --w: var(--pw); }
+  #lixoFan {
+    position: relative; width: 100%; min-height: calc(var(--pw) * 1.4 + 8px); padding: 4px; border-radius: 10px;
+    border: 2px dashed rgba(255,255,255,.18); justify-content: flex-start;
+  }
+  #lixoFan:empty::before { content: "vazio"; margin: auto; color: rgba(255,255,255,.35); font-size: 13px; }
+  .lixo.can-take #lixoFan, .lixo.can-drop #lixoFan { cursor: pointer; border-color: var(--accent); background: rgba(242,184,75,.12); }
+  .lixo.locked #lixoFan { border-color: #ff6b6b; background: rgba(255,80,80,.12); }
+  .lixo.locked .plabel::after { content: " 🔒 trancado"; color: #ffb3b3; font-weight: 700; }
+
+  #myHand { --w: var(--cw); min-height: calc(var(--cw) * 1.75); padding-top: calc(var(--cw) * .35); }
+  #myHand .card { cursor: pointer; transition: transform .15s, box-shadow .15s; }
+  @media (hover: hover) { #myHand .card:hover { transform: translateY(-8%); } }
+  #myHand .card.sel { transform: translateY(-26%); box-shadow: 0 0 0 3px var(--accent), 0 8px 16px rgba(0,0,0,.45); }
+
+  .bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
+  #status { font-size: 15px; font-weight: 600; min-height: 20px; text-shadow: 0 1px 2px rgba(0,0,0,.5); }
+  #status.warn { color: var(--accent); }
+  .acts { display: flex; flex-wrap: wrap; gap: 6px; }
+  .acts button { width: auto; padding: 9px 14px; border-color: rgba(255,255,255,.18); background: rgba(10,30,20,.55); }
+  .acts button.primary { background: var(--accent); border-color: var(--accent); color: #1f1b10; }
+  .hint { font-size: 12px; color: rgba(255,255,255,.55); min-height: 15px; }
+
+  /* ===== Cartas ===== */
+  .card {
+    --w: inherit;
+    position: relative; flex: none; width: var(--w); height: calc(var(--w) * 1.4);
+    border-radius: calc(var(--w) * .1); color: #1d1d22;
+    background: linear-gradient(160deg, #ffffff 0%, #f4f0e6 100%);
+    box-shadow: 0 1px 2px rgba(0,0,0,.35), 0 4px 10px rgba(0,0,0,.28);
+    font-family: Georgia, "Times New Roman", serif;
+  }
+  .card.red { color: #c62828; }
+  .card .ix {
+    position: absolute; top: 5%; left: 6%; display: flex; flex-direction: column; align-items: center;
+    line-height: .92; font-size: calc(var(--w) * .27); font-weight: 700; letter-spacing: -.04em;
+  }
+  .card .ix i { font-style: normal; font-size: .82em; }
+  .card .ix.br { top: auto; left: auto; bottom: 5%; right: 6%; transform: rotate(180deg); }
+  .card .pip { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: calc(var(--w) * .5); }
+  .card .pip.fc { font-size: calc(var(--w) * .42); font-weight: 700; flex-direction: column; line-height: .9; }
+  .card .pip.fc small { font-size: .55em; }
+  .card.wild { background: linear-gradient(160deg, #fffaf0 0%, #fbe7b3 100%); box-shadow: inset 0 0 0 2px #e0a92e, 0 1px 2px rgba(0,0,0,.35), 0 4px 10px rgba(0,0,0,.28); }
+  .card.wild::after { content: "★"; position: absolute; top: 4%; right: 7%; font-size: calc(var(--w) * .2); color: #c98a00; }
+  .card.back {
+    background:
+      radial-gradient(circle at 50% 50%, rgba(255,255,255,.18) 0 18%, transparent 19%),
+      repeating-linear-gradient(45deg, #b3283a 0 5px, #8f1c2c 5px 10px);
+    border: calc(var(--w) * .07) solid #f6f1e6;
+  }
+
+  /* ===== Avisos ===== */
+  #toast {
+    position: absolute; left: 50%; top: 46%; transform: translate(-50%, -50%); z-index: 30; pointer-events: none;
+    background: rgba(12, 20, 16, .88); color: #fff; padding: 12px 22px; border-radius: 999px; font-weight: 700; font-size: 17px;
+    box-shadow: 0 10px 30px rgba(0,0,0,.5); text-align: center; max-width: 86%; opacity: 0;
+  }
+  #toast.err { background: rgba(120, 24, 24, .92); font-size: 15px; }
+  #toast.gold { background: var(--accent); color: #2a1e05; }
+  #toast.show { animation: toast 1.6s ease-out forwards; }
+  @keyframes toast {
+    0% { opacity: 0; transform: translate(-50%, -30%) scale(.8); }
+    12% { opacity: 1; transform: translate(-50%, -50%) scale(1.04); }
+    20% { transform: translate(-50%, -50%) scale(1); }
+    80% { opacity: 1; }
+    100% { opacity: 0; transform: translate(-50%, -60%); }
+  }
+  #cover {
+    position: absolute; inset: 0; z-index: 25; border-radius: 12px; cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center; padding: 20px;
+    background: radial-gradient(ellipse at center, #1e5a3a, #0c2c1c);
+  }
+  #cover h2 { margin: 0; font-size: 26px; }
+  #cover p { margin: 0; color: #cfe3d6; }
+  #cover .big { font-size: 48px; animation: nudge 1.6s ease-in-out infinite; }
+  #chatToast {
+    position: absolute; left: 50%; bottom: -18px; transform: translateX(-50%);
+    width: auto; max-width: 90%; z-index: 26; border: none; border-radius: 999px; padding: 9px 18px;
+    background: var(--accent); color: #1f1b10; font-size: 14px; font-weight: 600;
+    box-shadow: 0 6px 18px rgba(0,0,0,.5); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    animation: pop .25s ease-out;
+  }
+  @keyframes pop { from { opacity: 0; transform: translateX(-50%) translateY(10px); } }
+
+  /* ===== Painel ===== */
+  .side { display: flex; flex-direction: column; gap: 16px; width: 300px; flex: none; }
+  .panel { background: var(--panel); border-radius: 12px; padding: 20px; box-shadow: 0 6px 20px rgba(0,0,0,.3); }
+  h1 { margin: 0 0 4px; font-size: 26px; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 14px; }
+  .score { background: #1f2430; border-radius: 10px; padding: 10px 12px; margin-bottom: 6px; }
+  .score .row { display: flex; justify-content: space-between; font-size: 15px; padding: 2px 0; }
+  .score .row b { color: var(--accent); font-variant-numeric: tabular-nums; }
+  .score .meta { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  label { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4px; text-transform: uppercase; letter-spacing: .04em; }
+  input {
+    width: 100%; padding: 9px 10px; border-radius: 8px; border: 1px solid #434a5e;
+    background: #1f2430; color: var(--text); font-size: 12px;
+  }
+  select, button {
+    width: 100%; padding: 9px 10px; border-radius: 8px; border: 1px solid #434a5e;
+    background: #1f2430; color: var(--text); font-size: 14px;
+  }
+  button { cursor: pointer; font-weight: 600; }
+  button.primary { background: var(--accent); color: #1f1b10; border-color: var(--accent); }
+  button:hover { filter: brightness(1.1); }
+  button:disabled { opacity: .4; cursor: default; filter: none; }
+  .btns { display: flex; gap: 8px; margin-top: 16px; }
+  details { margin-top: 16px; font-size: 13px; color: var(--muted); }
+  summary { cursor: pointer; color: var(--text); }
+  details ul { padding-left: 18px; margin: 8px 0 0; line-height: 1.5; }
+  .moves { background: var(--panel); border-radius: 12px; padding: 16px 12px; box-shadow: 0 6px 20px rgba(0,0,0,.3); display: flex; flex-direction: column; }
+  .moves h3 { margin: 0 0 10px 6px; font-size: 16px; }
+  #logList { height: 220px; overflow-y: auto; font-size: 13px; line-height: 1.35; }
+  .lg { padding: 3px 6px; border-radius: 4px; }
+  .lg:nth-child(odd) { background: rgba(255,255,255,.04); }
+  .lg.hd { color: var(--accent); font-weight: 700; }
+  .lg:last-child:not(.hd) { color: var(--accent); }
+  #chatLog {
+    height: 150px; overflow-y: auto; background: #1f2430; border-radius: 8px; padding: 8px;
+    font-size: 13px; line-height: 1.4; margin-bottom: 6px; border: 1px solid #434a5e;
+  }
+  .msg { margin: 2px 0; word-break: break-word; }
+  .msg.me { color: var(--accent); }
+  .msg.sys { color: var(--muted); font-style: italic; }
+  #chatForm { display: flex; gap: 6px; }
+  #chatForm input { flex: 1; min-width: 0; font-size: 14px; }
+  #chatForm button { width: auto; padding: 9px 14px; }
+  button, .card, .meld, .pile, #lixoFan { touch-action: manipulation; }
+
+  /* ===== Modal de fim de mão ===== */
+  #modal { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: none; align-items: center; justify-content: center; z-index: 40; padding: 12px; }
+  #modal.show { display: flex; }
+  #modal .box { background: var(--panel); padding: 24px 26px; border-radius: 14px; text-align: center; width: 100%; max-width: 440px; animation: rise .3s ease-out; }
+  @keyframes rise { from { opacity: 0; transform: translateY(18px) scale(.97); } }
+  #modal h2 { margin: 0 0 4px; font-size: 26px; }
+  #modal p { color: var(--muted); margin: 0 0 14px; }
+  .sc { width: 100%; border-collapse: collapse; font-size: 14px; margin-bottom: 16px; font-variant-numeric: tabular-nums; }
+  .sc th, .sc td { padding: 5px 6px; text-align: right; }
+  .sc th:first-child, .sc td:first-child { text-align: left; color: var(--muted); }
+  .sc thead th { color: var(--text); border-bottom: 1px solid #434a5e; }
+  .sc tr.tot td { border-top: 1px solid #434a5e; font-weight: 700; color: var(--text); }
+  .sc tr.gt td { font-weight: 700; color: var(--accent); font-size: 16px; }
+  .sc .neg { color: #ff8a80; }
+  #modal .row { display: flex; gap: 8px; }
+  .confetti { position: fixed; top: -12px; width: 9px; height: 14px; z-index: 50; pointer-events: none; border-radius: 2px; }
+
+  /* celular / telas estreitas: mesa em cima, painel embaixo */
+  @media (max-width: 900px) {
+    :root {
+      --cw: clamp(40px, 10.5vw, 66px); --mw: clamp(28px, 7vw, 46px);
+      --ow: clamp(16px, 4.4vw, 28px); --pw: clamp(38px, 9.5vw, 58px);
+    }
+    body { padding: 8px; align-items: flex-start; }
+    .app { flex-direction: column; align-items: center; gap: 12px; }
+    .table { width: 100%; min-height: 0; border-width: 6px; border-radius: 16px; padding: 10px 8px 10px; }
+    .side { width: 100%; max-width: 560px; }
+    .panel { padding: 16px; }
+    #logList { height: 150px; }
+    h1 { font-size: 22px; }
+    .seat-info { font-size: 12px; }
+    .melds { gap: 12px 12px; padding: 6px 6px 14px; }
+    .bar { flex-direction: column; align-items: stretch; }
+    .acts { justify-content: center; }
+    .acts button { flex: 1; min-width: 0; padding: 10px 8px; }
+    select, input, #chatForm input { font-size: 16px; } /* evita zoom automático no iPhone */
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="table" id="table">
+    <div class="seat-info" id="oppInfo"></div>
+    <div class="fan" id="oppHand"></div>
+    <div class="melds" id="oppMelds"></div>
+    <div class="center">
+      <div class="pile" id="stockPile"><div class="pbody" id="stockBody"></div><span class="plabel">Monte <b id="stockCnt">0</b></span></div>
+      <div class="pile" id="mortoPile"><div class="pbody" id="mortoBody"></div><span class="plabel">Mortos <b id="mortoCnt">0</b></span></div>
+      <div class="lixo" id="lixo"><div class="fan" id="lixoFan"></div><span class="plabel">Lixo <b id="lixoCnt">0</b></span></div>
+    </div>
+    <div class="melds" id="myMelds"></div>
+    <div class="fan" id="myHand"></div>
+    <div class="bar">
+      <div>
+        <div id="status"></div>
+        <div class="hint" id="hint"></div>
+      </div>
+      <div class="acts">
+        <button id="bDraw" class="primary">Comprar</button>
+        <button id="bTake">Pegar lixo</button>
+        <button id="bMeld" class="primary">Baixar</button>
+        <button id="bDisc">Descartar</button>
+        <button id="bNext" class="primary">Ver placar</button>
+        <button id="bSort">⇅ Valor</button>
+      </div>
+    </div>
+    <div class="seat-info" id="myInfo"></div>
+    <div id="toast"></div>
+    <div id="cover" hidden><div class="big">🂠</div><h2 id="coverTitle"></h2><p>Toque para ver suas cartas</p></div>
+    <button id="chatToast" type="button" hidden></button>
+  </div>
+
+  <div class="side">
+    <div class="panel">
+      <h1>Tranca</h1>
+      <div class="sub">Mano a mano · 2 baralhos</div>
+      <div class="score" id="score"></div>
+
+      <label for="mode">Modo</label>
+      <select id="mode">
+        <option value="ai">Contra o computador</option>
+        <option value="pvp">2 jogadores (mesmo aparelho)</option>
+        <option value="online">Online (por link)</option>
+      </select>
+      <div id="levelOpt">
+        <label for="level">Nível</label>
+        <select id="level">
+          <option value="1">Fácil</option>
+          <option value="2" selected>Médio</option>
+          <option value="3">Difícil</option>
+        </select>
+      </div>
+      <div id="targetOpt">
+        <label for="target">Partida</label>
+        <select id="target">
+          <option value="0">Uma mão só</option>
+          <option value="1500" selected>Até 1.500 pontos</option>
+          <option value="3000">Até 3.000 pontos</option>
+        </select>
+      </div>
+      <div id="onOpts" style="display:none">
+        <button id="createRoom" class="primary" style="margin-top:12px">Criar sala e gerar link</button>
+        <div id="roomBox" hidden>
+          <label for="roomLink">Envie este link ao adversário</label>
+          <input id="roomLink" readonly>
+          <button id="copyLink" style="margin-top:6px">Copiar link</button>
+        </div>
+        <div id="netStatus" class="sub" style="margin:10px 0 0"></div>
+      </div>
+
+      <div class="btns">
+        <button id="new" class="primary">Nova partida</button>
+      </div>
+
+      <div id="chat" hidden>
+        <label for="chatInput">Chat</label>
+        <div id="chatLog"></div>
+        <form id="chatForm">
+          <input id="chatInput" maxlength="300" placeholder="Digite uma mensagem…" autocomplete="off">
+          <button class="primary" type="submit">Enviar</button>
+        </form>
+      </div>
+
+      <details>
+        <summary>Regras</summary>
+        <ul>
+          <li>2 baralhos (104 cartas). Cada jogador recebe <b>11 cartas</b> e há <b>2 mortos</b> de 11.</li>
+          <li>Na sua vez: <b>compre</b> do monte ou <b>pegue o lixo</b>, baixe jogos e <b>descarte</b> uma carta.</li>
+          <li>Jogo = 3 ou mais cartas do <b>mesmo valor</b> (naipes livres). O <b>2 é curinga</b>: no máximo um por jogo.</li>
+          <li>Para pegar o lixo, a carta do topo precisa entrar num jogo na hora (com 2 cartas da mão ou num jogo seu já baixado). Você leva o lixo inteiro.</li>
+          <li><b>3 preto</b> descartado <b>tranca o lixo</b>. 3 pretos só podem ser baixados na batida.</li>
+          <li><b>3 vermelho</b> vai direto para a mesa e você compra outra carta: +100 se tiver canastra, −100 se não tiver.</li>
+          <li><b>Canastra</b>: 7 cartas ou mais. Limpa (sem curinga) +200, suja +100. Não é permitido sujar uma canastra limpa.</li>
+          <li>Ao ficar sem cartas você pega o <b>morto</b>. Para <b>bater</b> é preciso ter pego o morto e ter uma canastra limpa (+100).</li>
+          <li>Pontos: A = 15, 2 = 10, 8 a K = 10, 3 a 7 = 5. Cartas na mesa somam, cartas na mão descontam. Morto não pego: −100.</li>
+          <li>Se o monte acabar, o morto restante vira monte. Sem monte e sem morto, a mão termina.</li>
+        </ul>
+      </details>
+    </div>
+    <div class="moves">
+      <h3>Jogadas</h3>
+      <div id="logList"></div>
+    </div>
+  </div>
+</div>
+
+<div id="modal"><div class="box">
+  <h2 id="mTitle"></h2><p id="mText"></p>
+  <div id="mBody"></div>
+  <div class="row"><button id="mView">Ver a mesa</button><button class="primary" id="mBtn">Próxima mão</button></div>
+</div></div>
+
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script>
+// ===== Cartas =====
+// carta = número de 0 a 103 (dois baralhos); valor 1 = Ás ... 13 = Rei
+const SU = ['♠', '♥', '♦', '♣'];
+const RL = [, 'A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+const rk = c => c % 13 + 1;
+const st = c => Math.floor(c % 52 / 13);
+const redSuit = s => s === 1 || s === 2;
+const isWild = c => rk(c) === 2;
+const isRed3 = c => rk(c) === 3 && redSuit(st(c));
+const isBlack3 = c => rk(c) === 3 && !redSuit(st(c));
+const cardVal = c => { const r = rk(c); return r === 1 ? 15 : r === 2 ? 10 : r <= 7 ? 5 : 10; };
+const cardName = c => RL[rk(c)] + SU[st(c)];
+const rankOrder = r => (r === 1 ? 14 : r === 2 ? 15 : r); // 3..K, A, curingas no fim
+const isCanastra = m => m.c.length >= 7;
+const isClean = m => !m.c.some(isWild);
+const clone = o => JSON.parse(JSON.stringify(o));
+
+// gerador pseudoaleatório com semente: os dois aparelhos embaralham igual no online
+function rng(seed) {
+  return () => {
+    seed = seed + 0x6D2B79F5 | 0;
+    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+const randSeed = () => Math.floor(Math.random() * 4294967296);
+
+// ===== Motor de regras =====
+function deal(seed, starter) {
+  const R = rng(seed);
+  const deck = [...Array(104).keys()];
+  for (let i = deck.length - 1; i > 0; i--) { const j = Math.floor(R() * (i + 1)); [deck[i], deck[j]] = [deck[j], deck[i]]; }
+  const G = {
+    stock: [], discard: [], mortos: [], turn: starter, phase: 'draw', over: null,
+    pl: [0, 1].map(() => ({ hand: [], melds: [], red3: [], morto: false, disc: [], took: [] })),
+  };
+  for (let k = 0; k < 11; k++) for (const p of [starter, 1 - starter]) G.pl[p].hand.push(deck.pop());
+  G.mortos = [deck.splice(-11), deck.splice(-11)];
+  G.stock = deck;
+  const ev = [];
+  for (const p of [starter, 1 - starter]) placeRed3(G, p, ev);
+  G.ev0 = ev;
+  return G;
+}
+
+function drawCard(G, ev) {
+  if (!G.stock.length && G.mortos.length) { G.stock = G.mortos.pop(); ev.push({ k: 'mortoStock' }); }
+  return G.stock.length ? G.stock.pop() : null;
+}
+
+// 3 vermelhos vão para a mesa e são repostos com cartas do monte
+function placeRed3(G, p, ev) {
+  const P = G.pl[p];
+  for (;;) {
+    const i = P.hand.findIndex(isRed3);
+    if (i < 0) break;
+    const c = P.hand.splice(i, 1)[0];
+    P.red3.push(c);
+    ev.push({ k: 'red3', p, c });
+    const n = drawCard(G, ev);
+    if (n == null) break;
+    P.hand.push(n);
+  }
+}
+
+const mortoAvail = (G, p) => !G.pl[p].morto && G.mortos.length > 0;
+// bater: já pegou o morto (ou não sobrou morto) e tem canastra limpa
+const canBater = (G, p) => (G.pl[p].morto || !G.mortos.length) && G.pl[p].melds.some(m => isCanastra(m) && isClean(m));
+
+function takeMorto(G, p, ev) {
+  const P = G.pl[p], m = G.mortos.pop();
+  P.hand.push(...m);
+  P.morto = true;
+  ev.push({ k: 'morto', p, cards: m });
+  placeRed3(G, p, ev);
+}
+
+function lixoBlock(G) {
+  if (!G.discard.length) return 'O lixo está vazio.';
+  const top = G.discard[G.discard.length - 1];
+  if (isBlack3(top)) return 'O lixo está trancado pelo 3 preto.';
+  if (isWild(top)) return 'Não dá para pegar o lixo com um curinga no topo.';
+  return null;
+}
+
+function meldErr(r, cards) {
+  const nat = cards.filter(c => !isWild(c)), w = cards.length - nat.length;
+  if (nat.some(c => rk(c) !== r)) return 'Um jogo só pode ter cartas do mesmo valor (o 2 é curinga).';
+  if (w > 1) return 'Cada jogo pode ter no máximo um curinga.';
+  if (cards.length < 3) return 'Um jogo precisa de pelo menos 3 cartas.';
+  if (r === 3 && w) return 'O jogo de 3 pretos não aceita curinga.';
+  return null;
+}
+
+const sortMeld = cards => cards.slice().sort((a, b) => (isWild(a) - isWild(b)) || (st(a) - st(b)));
+
+// cria um jogo novo ou completa o jogo daquele valor; extra = carta vinda do lixo
+function putMeld(G, p, r, handCards, extra, ev) {
+  const P = G.pl[p];
+  let m = P.melds.find(x => x.r === r);
+  const before = m ? m.c : [];
+  const all = [...before, ...extra, ...handCards];
+  const e = meldErr(r, all);
+  if (e) return e;
+  if (m && isCanastra(m) && isClean(m) && !all.every(c => !isWild(c))) return 'Não é permitido sujar uma canastra limpa.';
+  P.hand = P.hand.filter(c => !handCards.includes(c));
+  if (m) m.c = sortMeld(all);
+  else { m = { r, c: sortMeld(all) }; P.melds.push(m); P.melds.sort((a, b) => rankOrder(a.r) - rankOrder(b.r)); }
+  ev.push({ k: before.length ? 'add' : 'meld', p, r, n: extra.length + handCards.length });
+  if (before.length < 7 && all.length >= 7) ev.push({ k: 'canastra', p, r, clean: isClean(m) });
+  return null;
+}
+
+// depois de baixar: mão vazia pega o morto ou bate; nunca pode ficar travado sem descarte
+function afterPlay(G, p, ev, black3) {
+  const h = G.pl[p].hand.length, ma = mortoAvail(G, p), cb = canBater(G, p);
+  if (black3 && (ma || !cb || h > 1)) return 'Os 3 pretos só podem ser baixados na batida (com o morto já pego e canastra limpa).';
+  if (h === 0) {
+    if (ma) takeMorto(G, p, ev);
+    else if (cb) { ev.push({ k: 'bate', p }); endHand(G, p); }
+    else return 'Guarde ao menos uma carta para descartar.';
+  } else if (h === 1 && !ma && !cb) return 'Sem canastra limpa você ainda não pode bater: fique com pelo menos 2 cartas.';
+  return null;
+}
+
+function scoreOf(G, p) {
+  const P = G.pl[p];
+  let mesa = 0, limpas = 0, sujas = 0;
+  for (const m of P.melds) {
+    for (const c of m.c) mesa += cardVal(c);
+    if (isCanastra(m)) isClean(m) ? limpas++ : sujas++;
+  }
+  const red = P.red3.length * (limpas + sujas ? 100 : -100);
+  const bat = G.over.bate === p ? 100 : 0;
+  const morto = !P.morto && G.mortos.length ? -100 : 0;
+  const mao = -P.hand.reduce((s, c) => s + cardVal(c), 0);
+  return { mesa, limpas, sujas, red, bat, morto, mao, total: mesa + limpas * 200 + sujas * 100 + red + bat + morto + mao };
+}
+
+function endHand(G, bate) {
+  G.over = { bate };
+  G.over.score = [scoreOf(G, 0), scoreOf(G, 1)];
+}
+
+// aplica uma ação; devolve { G, ev } com o novo estado ou { err }
+// ações: {t:'draw'} | {t:'take', cards} | {t:'meld', cards, r?} | {t:'discard', c}
+function act(G0, p, a) {
+  const fail = err => ({ err });
+  if (!G0 || G0.over) return fail('A mão já terminou.');
+  if (G0.turn !== p) return fail('Não é a sua vez.');
+  if (!a || typeof a !== 'object') return fail('Jogada inválida.');
+  const G = clone(G0), P = G.pl[p], ev = [];
+  const cards = Array.isArray(a.cards) ? a.cards.map(Number) : [];
+  if (new Set(cards).size !== cards.length || cards.some(c => !P.hand.includes(c))) return fail('Cartas inválidas.');
+
+  if (a.t === 'draw') {
+    if (G.phase !== 'draw') return fail('Você já comprou nesta vez.');
+    const c = drawCard(G, ev);
+    if (c == null) { ev.push({ k: 'end' }); endHand(G, null); }
+    else { P.hand.push(c); ev.push({ k: 'draw', p, c }); placeRed3(G, p, ev); G.phase = 'play'; }
+
+  } else if (a.t === 'take') {
+    if (G.phase !== 'draw') return fail('Você já comprou nesta vez.');
+    const b = lixoBlock(G);
+    if (b) return fail(b);
+    const top = G.discard[G.discard.length - 1], r = rk(top);
+    if (!P.melds.some(m => m.r === r) && cards.length < 2)
+      return fail(`Para pegar o lixo, selecione na mão as cartas que formam jogo com o ${cardName(top)}.`);
+    ev.push({ k: 'take', p, n: G.discard.length });
+    const e = putMeld(G, p, r, cards, [top], ev);
+    if (e) return fail(e);
+    G.discard.pop();
+    P.took.push(...G.discard.map(rk));
+    P.hand.push(...G.discard);
+    G.discard = [];
+    G.phase = 'play';
+    const e2 = afterPlay(G, p, ev, false);
+    if (e2) return fail(e2);
+
+  } else if (a.t === 'meld') {
+    if (G.phase !== 'play') return fail('Primeiro compre do monte ou pegue o lixo.');
+    if (!cards.length) return fail('Selecione as cartas do jogo.');
+    const nat = cards.filter(c => !isWild(c));
+    const r = a.r != null ? Number(a.r) : (nat.length ? rk(nat[0]) : 0);
+    if (!r || r === 2) return fail('Um jogo precisa de cartas naturais, não só curingas.');
+    const e = putMeld(G, p, r, cards, [], ev);
+    if (e) return fail(e);
+    const e2 = afterPlay(G, p, ev, r === 3);
+    if (e2) return fail(e2);
+
+  } else if (a.t === 'discard') {
+    if (G.phase !== 'play') return fail('Primeiro compre do monte ou pegue o lixo.');
+    const c = Number(a.c);
+    if (!P.hand.includes(c)) return fail('Selecione uma carta para descartar.');
+    P.hand = P.hand.filter(x => x !== c);
+    G.discard.push(c);
+    P.disc.push(rk(c));
+    const ti = P.took.indexOf(rk(c));
+    if (ti >= 0) P.took.splice(ti, 1);
+    ev.push({ k: 'discard', p, c });
+    if (isBlack3(c)) ev.push({ k: 'lock', p });
+    if (!P.hand.length) {
+      if (mortoAvail(G, p)) takeMorto(G, p, ev);
+      else if (canBater(G, p)) { ev.push({ k: 'bate', p }); endHand(G, p); }
+      else return fail('Você não pode ficar sem cartas: para bater precisa do morto e de uma canastra limpa.');
+    }
+    if (!G.over) { G.turn = 1 - p; G.phase = 'draw'; }
+
+  } else return fail('Jogada inválida.');
+
+  return { G, ev };
+}
+
+// ===== IA =====
+const valid = (G, p, a) => !act(G, p, a).err;
+
+function aiNext(G, p, level) {
+  const P = G.pl[p];
+  if (G.phase === 'draw') {
+    if (!lixoBlock(G)) {
+      const r = rk(G.discard[G.discard.length - 1]);
+      const nat = P.hand.filter(c => !isWild(c) && rk(c) === r), w = P.hand.filter(isWild);
+      const opts = [];
+      if (P.melds.some(m => m.r === r)) opts.push({ cards: nat, wild: false }, { cards: [], wild: false });
+      if (nat.length >= 2) opts.push({ cards: nat, wild: false }, { cards: nat.slice(0, 2), wild: false });
+      if (nat.length === 1 && w.length) opts.push({ cards: [nat[0], w[0]], wild: true });
+      const n = G.discard.length;
+      for (const o of opts) {
+        const want = level === 1 ? (!o.wild && Math.random() < .6) : (!o.wild || n >= (level === 3 ? 4 : 6));
+        const a = { t: 'take', cards: o.cards };
+        if (want && valid(G, p, a)) return a;
+      }
+    }
+    return { t: 'draw' };
+  }
+
+  const byRank = {};
+  for (const c of P.hand) if (!isWild(c)) (byRank[rk(c)] = byRank[rk(c)] || []).push(c);
+  const wilds = P.hand.filter(isWild);
+  const cands = [];
+  for (const m of P.melds) if (byRank[m.r]) {
+    cands.push({ t: 'meld', r: m.r, cards: byRank[m.r] });
+    if (byRank[m.r].length > 1) cands.push({ t: 'meld', r: m.r, cards: byRank[m.r].slice(1) });
+  }
+  for (const r in byRank) {
+    if (+r !== 3 && byRank[r].length >= 3 && !P.melds.some(m => m.r === +r)) {
+      if (level === 1 && Math.random() < .25) continue; // fácil às vezes "esquece" de baixar
+      cands.push({ t: 'meld', cards: byRank[r] });
+    }
+  }
+  if (byRank[3] && byRank[3].length >= 3) cands.push({ t: 'meld', r: 3, cards: byRank[3] });
+  if (level >= 2 && wilds.length) {
+    const hasClean = P.melds.some(m => isCanastra(m) && isClean(m));
+    // com a limpa garantida, o curinga ajuda a fechar outra canastra
+    if (hasClean) for (const m of P.melds) if (m.c.length >= 5 && !isCanastra(m) && isClean(m)) cands.push({ t: 'meld', r: m.r, cards: [wilds[0]] });
+    if (P.hand.length >= 7) for (const r in byRank)
+      if (+r !== 3 && byRank[r].length === 2 && !P.melds.some(m => m.r === +r)) cands.push({ t: 'meld', cards: [...byRank[r], wilds[0]] });
+    // na hora de bater, o curinga entra em qualquer jogo
+    if (canBater(G, p)) for (const m of P.melds) if (!isCanastra(m) && isClean(m)) cands.push({ t: 'meld', r: m.r, cards: [wilds[0]] });
+  }
+  for (const a of cands) if (valid(G, p, a)) return a;
+  return { t: 'discard', c: chooseDiscard(G, p, level) };
+}
+
+function chooseDiscard(G, p, level) {
+  const P = G.pl[p], Q = G.pl[1 - p];
+  const oppRanks = new Set(Q.melds.map(m => m.r));
+  const cnt = {};
+  for (const c of P.hand) cnt[rk(c)] = (cnt[rk(c)] || 0) + 1;
+  const score = c => {
+    const r = rk(c);
+    if (isWild(c)) return 1000;
+    let s = 0;
+    if (isBlack3(c)) s -= level >= 2 ? 70 : 0; // tranca o lixo para o adversário
+    else s += (cnt[r] - 1) * 45;               // pares e trincas ficam na mão
+    if (level >= 2 && oppRanks.has(r)) s += 220; // daria o lixo ao adversário
+    if (level >= 3) {
+      if (Q.took.includes(r)) s += 120;          // ele já tem essa carta na mão
+      if (Q.disc.slice(-6).includes(r)) s -= 25; // ele descartou: não está juntando
+    }
+    if (P.melds.some(m => m.r === r)) s += 30;
+    s -= cardVal(c) * .6;
+    if (level === 1) s += Math.random() * 90;
+    return s;
+  };
+  const order = P.hand.slice().sort((a, b) => score(a) - score(b));
+  return order.find(c => valid(G, p, { t: 'discard', c })) ?? order[0];
+}
+
+// ===== Estado e interface =====
+const $ = id => document.getElementById(id);
+let G = null;        // mão em andamento
+let M = null;        // partida: { target, scores, hand, starter, scored }
+let sel = new Set(); // cartas selecionadas na mão
+let busy = false, thinking = false, token = 0;
+let sortMode = 'rank';
+let pvView = -1, dealPending = false; // 2 jogadores no mesmo aparelho
+let logLines = [];
+let netQ = [];
+
+const cfg = () => ({ mode: $('mode').value, level: parseInt($('level').value, 10) });
+const connected = () => !!(net && net.conn && net.conn.open);
+
+// de que lado da mesa a tela está
+function viewer() {
+  const m = cfg().mode;
+  if (m === 'online') return net ? net.me : 0;
+  if (m === 'pvp') return pvView >= 0 ? pvView : (G ? G.turn : 0);
+  return 0;
+}
+function name(p) {
+  const m = cfg().mode;
+  if (m === 'pvp') return 'Jogador ' + (p + 1);
+  if (m === 'online') return p === viewer() ? 'Você' : 'Adversário';
+  return p === 0 ? 'Você' : 'Computador';
+}
+// é a vez de quem está na frente da tela?
+function isMine() {
+  if (!G || G.over) return false;
+  const m = cfg().mode;
+  if (m === 'ai') return G.turn === 0;
+  if (m === 'online') return connected() && G.turn === net.me;
+  return pvView === G.turn;
+}
+const canAct = () => isMine() && !busy && !thinking;
+
+function freshMatch() {
+  return { target: parseInt($('target').value, 10), scores: [0, 0], hand: 1, starter: 0, scored: false };
+}
+const advanceMatch = () => { M = { ...M, scores: M.scores.slice(), hand: M.hand + 1, starter: 1 - M.starter, scored: false }; };
+
+// -1 = partida segue; 0/1 = vencedor; 2 = empate
+function matchResult() {
+  if (!M || !M.scored) return -1;
+  const [a, b] = M.scores;
+  if (M.target === 0 || Math.max(a, b) >= M.target) return a === b ? (M.target === 0 ? 2 : -1) : (a > b ? 0 : 1);
+  return -1;
+}
+
+function newMatch() {
+  const c = cfg();
+  if (c.mode === 'online') {
+    if (!connected()) { token++; G = null; M = null; render(); return; }
+    if (net.role === 'host') hostDeal(true); else netSend({ t: 'req', w: 'new' });
+    return;
+  }
+  M = freshMatch();
+  beginHand(randSeed());
+}
+
+function nextHand() {
+  if (!M || matchResult() !== -1) return newMatch();
+  if (!G || !G.over) return;
+  if (cfg().mode === 'online') {
+    if (net && net.role === 'host') hostDeal(false); else { netSend({ t: 'req', w: 'next' }); flash('Aguardando o anfitrião…'); }
+    return;
+  }
+  advanceMatch();
+  beginHand(randSeed());
+}
+
+function beginHand(seed) {
+  token++; busy = false; thinking = false; netQ = [];
+  G = deal(seed, M.starter);
+  sel.clear();
+  $('modal').classList.remove('show');
+  logLines = [];
+  addLog(`Mão ${M.hand} — ${name(G.turn)} começa`, 'hd');
+  G.ev0.forEach(e => addLog(evText(e)));
+  if (cfg().mode === 'pvp') { pvView = -1; dealPending = true; render(); return; }
+  animateDeal();
+}
+
+function animateDeal() {
+  dealPending = false;
+  render();
+  busy = true;
+  const tok = token;
+  playFlip(new Map(), new Map(), 26).then(() => { if (tok !== token) return; busy = false; render(); maybeAI(); pump(); });
+}
+
+// aplica a jogada de p; remote = veio da rede ou do computador (sem mensagem de erro na tela)
+function doAct(p, a, remote = false) {
+  const r = act(G, p, a);
+  if (r.err) { if (!remote) flash(r.err, 'err'); return false; }
+  if (cfg().mode === 'online' && !remote) netSend({ t: 'act', a });
+  commit(r);
+  return true;
+}
+
+function commit(r) {
+  const prev = captureRects();
+  const origins = new Map();
+  for (const e of r.ev) if (e.k === 'morto') e.cards.forEach(c => origins.set(c, 'mortoBody'));
+  G = r.G;
+  r.ev.forEach(e => addLog(evText(e)));
+  render();
+  busy = true;
+  const tok = token;
+  playFlip(prev, origins, 0).then(() => {
+    if (tok !== token) return;
+    busy = false;
+    r.ev.forEach(evToast);
+    r.ev.filter(e => e.k === 'canastra').forEach(e => {
+      const box = e.p === viewer() ? 'myMelds' : 'oppMelds';
+      const el = document.querySelector(`#${box} .meld[data-r="${e.r}"]`);
+      if (el) { el.classList.remove('pop'); void el.offsetWidth; el.classList.add('pop'); }
+    });
+    if (G.over) {
+      if (!M.scored) { M.scores[0] += G.over.score[0].total; M.scores[1] += G.over.score[1].total; M.scored = true; }
+      render();
+      setTimeout(showEnd, 900);
+      return;
+    }
+    render();
+    maybeAI();
+    pump();
+  });
+}
+
+function maybeAI() {
+  if (cfg().mode !== 'ai' || !G || G.over || G.turn !== 1 || busy || thinking) return;
+  thinking = true;
+  render();
+  const tok = token;
+  setTimeout(() => {
+    if (tok !== token) return;
+    thinking = false;
+    const a = aiNext(G, 1, cfg().level);
+    if (doAct(1, a, true)) return;
+    // segurança: se a IA errar, compra ou descarta qualquer carta válida
+    if (G.phase === 'draw') doAct(1, { t: 'draw' }, true);
+    else G.pl[1].hand.some(c => doAct(1, { t: 'discard', c }, true));
+  }, G.phase === 'draw' ? 800 : 650);
+}
+
+// ===== Animações =====
+const FLY_MS = 420;
+
+function captureRects() {
+  const m = new Map();
+  document.querySelectorAll('#table [data-cid]').forEach(el =>
+    m.set(el.dataset.cid, { r: el.getBoundingClientRect(), back: el.classList.contains('back') }));
+  return m;
+}
+
+// FLIP: cada carta sai de onde estava (ou do monte/morto, se é nova) e desliza até o lugar atual
+function playFlip(prev, origins, stagger) {
+  const proms = [];
+  let i = 0;
+  document.querySelectorAll('#table [data-cid]').forEach(el => {
+    const id = el.dataset.cid;
+    const now = el.getBoundingClientRect();
+    let from = prev.get(id), delay = 0;
+    if (!from) {
+      const o = $(origins.get(+id) || 'stockBody');
+      if (!o) return;
+      from = { r: o.getBoundingClientRect(), back: true };
+      if (stagger) delay = (i++) * stagger;
+    }
+    const dx = from.r.left - now.left, dy = from.r.top - now.top;
+    const sx = from.r.width / (now.width || 1), sy = from.r.height / (now.height || 1);
+    if (Math.abs(dx) < 1 && Math.abs(dy) < 1 && Math.abs(sx - 1) < .02) return;
+    const flip = from.back !== el.classList.contains('back');
+    const start = `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`;
+    const frames = flip
+      ? [{ transform: start }, { transform: `translate(${dx / 2}px, ${dy / 2 - 30}px) scale(0.02, ${(sy + 1) / 2})`, offset: .5 }, { transform: 'none' }]
+      : [{ transform: start }, { transform: 'none' }];
+    el.style.transformOrigin = '0 0';
+    el.style.zIndex = 20;
+    const a = el.animate(frames, { duration: FLY_MS, delay, easing: 'cubic-bezier(.25,.8,.25,1)', fill: 'backwards' });
+    proms.push(a.finished.catch(() => {}).then(() => { el.style.transformOrigin = ''; el.style.zIndex = ''; }));
+  });
+  return Promise.all(proms);
+}
+
+// avisos no centro da mesa, um de cada vez
+let toastQ = [], toastOn = false;
+function flash(text, kind = '') {
+  if (kind === 'err') { toastQ = toastQ.filter(t => t.kind !== 'err'); }
+  toastQ.push({ text, kind });
+  if (!toastOn) nextToast();
+}
+function nextToast() {
+  const t = toastQ.shift();
+  if (!t) { toastOn = false; return; }
+  toastOn = true;
+  const el = $('toast');
+  el.textContent = t.text;
+  el.className = t.kind;
+  void el.offsetWidth;
+  el.classList.add('show');
+  setTimeout(nextToast, t.kind === 'err' ? 1700 : 1200);
+}
+
+function evToast(e) {
+  const N = name(e.p);
+  if (e.k === 'canastra') flash(`${e.clean ? '✨ Canastra limpa' : 'Canastra suja'} de ${RL[e.r]}!`, e.clean ? 'gold' : '');
+  else if (e.k === 'lock') flash('🔒 Lixo trancado!');
+  else if (e.k === 'morto') flash(`${N} pegou o morto`);
+  else if (e.k === 'bate') flash(`${N} bateu! 🎉`, 'gold');
+  else if (e.k === 'mortoStock') flash('O morto virou monte');
+  else if (e.k === 'take' && e.p !== viewer()) flash(`${N} pegou o lixo (${e.n})`);
+}
+
+function evText(e) {
+  const N = e.p != null ? name(e.p) : '';
+  const showCard = e.p === viewer() && cfg().mode !== 'pvp';
+  switch (e.k) {
+    case 'draw': return `${N} comprou do monte` + (showCard ? ` (${cardName(e.c)})` : '');
+    case 'take': return `${N} pegou o lixo (${e.n} cartas)`;
+    case 'meld': return `${N} baixou um jogo de ${RL[e.r]}`;
+    case 'add': return `${N} completou o jogo de ${RL[e.r]} (+${e.n})`;
+    case 'discard': return `${N} descartou ${cardName(e.c)}`;
+    case 'lock': return '🔒 Lixo trancado pelo 3 preto';
+    case 'red3': return `${N} baixou um 3 vermelho (${cardName(e.c)})`;
+    case 'morto': return `${N} pegou o morto`;
+    case 'mortoStock': return 'O monte acabou: o morto virou monte';
+    case 'canastra': return `${N} fez canastra ${e.clean ? 'limpa' : 'suja'} de ${RL[e.r]}!`;
+    case 'bate': return `${N} bateu!`;
+    case 'end': return 'O monte acabou — fim da mão';
+  }
+  return '';
+}
+
+function addLog(text, cls = '') {
+  if (!text) return;
+  logLines.push({ text, cls });
+}
+
+// ===== Desenho da mesa =====
+function cardHTML(c, cls = '', back = false) {
+  if (back) return `<div class="card back ${cls}" data-cid="${c}"></div>`;
+  const r = rk(c), s = st(c);
+  const center = r >= 11 ? `<span class="pip fc">${RL[r]}<small>${SU[s]}</small></span>` : `<span class="pip">${SU[s]}</span>`;
+  return `<div class="card${redSuit(s) ? ' red' : ''}${r === 2 ? ' wild' : ''} ${cls}" data-cid="${c}">` +
+    `<span class="ix"><b>${RL[r]}</b><i>${SU[s]}</i></span>${center}<span class="ix br"><b>${RL[r]}</b><i>${SU[s]}</i></span></div>`;
+}
+
+function sortHand(h) {
+  const key = c => sortMode === 'rank'
+    ? rankOrder(rk(c)) * 4 + st(c)
+    : (isWild(c) ? 100 : st(c) * 20) + rankOrder(rk(c));
+  return h.slice().sort((a, b) => key(a) - key(b));
+}
+
+function meldsHTML(P) {
+  if (!P.melds.length) return '<div class="empty">Nenhum jogo baixado</div>';
+  return P.melds.map(m => {
+    const can = isCanastra(m), clean = isClean(m);
+    const tag = can ? (clean ? 'Limpa' : 'Suja') + ' · ' + m.c.length : m.c.length;
+    return `<div class="meld${can ? (clean ? ' clean' : ' dirty') : ''}" data-r="${m.r}">${m.c.map(c => cardHTML(c)).join('')}<span class="mc">${tag}</span></div>`;
+  }).join('');
+}
+
+function seatInfo(p) {
+  const score = `<span class="pts">${M ? M.scores[p] : 0} pts</span>`;
+  if (!G) return `<span class="nm">${name(p)}</span>${score}`;
+  const P = G.pl[p];
+  const clean = P.melds.some(m => isCanastra(m) && isClean(m));
+  return `<span class="nm${!G.over && G.turn === p ? ' turn' : ''}">${name(p)}</span>` +
+    `<span class="pill">${P.hand.length} cartas</span>` +
+    `<span class="pill${P.morto ? ' ok' : ''}">${P.morto ? 'Pegou o morto' : 'Sem morto'}</span>` +
+    (clean ? '<span class="pill gold">Canastra limpa</span>' : '') +
+    (P.red3.length ? `<span class="r3">${P.red3.map(c => cardHTML(c)).join('')}</span>` : '') + score;
+}
+
+function layoutFan(el, maxStep) {
+  const cards = el.children, n = cards.length;
+  if (!n) return;
+  const cw = cards[0].offsetWidth, W = el.clientWidth - 8;
+  const step = n > 1 ? Math.max(8, Math.min(cw * maxStep, (W - cw) / (n - 1))) : 0;
+  el.style.setProperty('--ov', (step - cw) + 'px');
+}
+function layoutFans() {
+  layoutFan($('myHand'), .78);
+  layoutFan($('oppHand'), .55);
+  layoutFan($('lixoFan'), .42);
+}
+
+function render() {
+  const c = cfg();
+  const me = viewer(), op = 1 - me;
+  const P = G && G.pl[me], Q = G && G.pl[op];
+
+  // painel
+  $('levelOpt').style.display = c.mode === 'ai' ? '' : 'none';
+  $('targetOpt').style.display = (c.mode === 'online' && net && net.role === 'guest') ? 'none' : '';
+  $('onOpts').style.display = c.mode === 'online' ? '' : 'none';
+  $('createRoom').style.display = (c.mode === 'online' && (!net || net.role === 'host')) ? '' : 'none';
+  $('chat').hidden = !(c.mode === 'online' && net && net.conn);
+  const target = M ? M.target : parseInt($('target').value, 10);
+  $('score').innerHTML =
+    `<div class="row"><span>${name(me)}</span><b>${M ? M.scores[me] : 0}</b></div>` +
+    `<div class="row"><span>${name(op)}</span><b>${M ? M.scores[op] : 0}</b></div>` +
+    `<div class="meta">${M ? 'Mão ' + M.hand + ' · ' : ''}${target ? 'partida até ' + target.toLocaleString('pt-BR') + ' pontos' : 'partida de uma mão'}</div>`;
+  $('logList').innerHTML = logLines.map(l => `<div class="lg ${l.cls}">${l.text}</div>`).join('');
+  $('logList').scrollTop = $('logList').scrollHeight;
+
+  // mesa
+  $('oppInfo').innerHTML = seatInfo(op);
+  $('myInfo').innerHTML = seatInfo(me);
+  $('oppHand').innerHTML = Q ? Q.hand.map(x => cardHTML(x, '', true)).join('') : '';
+  $('oppMelds').innerHTML = Q ? meldsHTML(Q) : '';
+  $('myMelds').innerHTML = P ? meldsHTML(P) : '';
+  const n = G ? G.stock.length : 0;
+  $('stockBody').innerHTML = n ? '<div class="card back stack"></div>' : '<div class="slot"></div>';
+  $('stockCnt').textContent = n;
+  const mortos = G ? G.mortos.length : 0;
+  $('mortoBody').innerHTML = mortos ? '<div class="card back stack"></div>'.repeat(mortos) : '<div class="slot"></div>';
+  $('mortoCnt').textContent = mortos;
+  const d = G ? G.discard : [];
+  $('lixoFan').innerHTML = d.map(x => cardHTML(x)).join('');
+  $('lixoCnt').textContent = d.length;
+  $('lixo').classList.toggle('locked', !!d.length && isBlack3(d[d.length - 1]));
+  if (P) sel = new Set([...sel].filter(x => P.hand.includes(x)));
+  $('myHand').innerHTML = P ? sortHand(P.hand).map(x => cardHTML(x, sel.has(x) ? 'sel' : '')).join('') : '';
+
+  // vez de quem no modo 2 jogadores
+  const covered = c.mode === 'pvp' && G && !G.over && pvView !== G.turn;
+  $('cover').hidden = !covered;
+  if (covered) $('coverTitle').textContent = `Vez do ${name(G.turn)}`;
+
+  // status e botões
+  const st = $('status');
+  st.classList.remove('warn');
+  let text = '', hint = '';
+  if (!G) {
+    text = c.mode !== 'online' ? '' : !net ? 'Crie uma sala para jogar online'
+      : net.role === 'host' ? 'Aguardando o adversário entrar…'
+      : net.err ? 'Não foi possível conectar à sala' : 'Conectando à sala…';
+  } else if (G.over) text = G.over.bate != null ? `${name(G.over.bate)} bateu — fim da mão` : 'Fim da mão';
+  else if (isMine()) {
+    const who = c.mode === 'pvp' ? name(G.turn) + ': ' : 'Sua vez: ';
+    if (G.phase === 'draw') {
+      text = who + 'compre do monte ou pegue o lixo';
+      hint = d.length && isBlack3(d[d.length - 1]) ? 'O lixo está trancado: compre do monte.' : 'Para pegar o lixo, a carta do topo precisa formar jogo.';
+    } else {
+      text = who + 'baixe seus jogos e descarte';
+      hint = canBater(G, me) ? 'Você já pode bater!' : (!P.morto && G.mortos.length ? 'Fique sem cartas para pegar o morto.' : 'Para bater você precisa de uma canastra limpa.');
+    }
+    st.classList.add('warn');
+  } else if (c.mode === 'online' && !connected()) text = 'O adversário desconectou';
+  else text = c.mode === 'ai' ? 'Computador jogando…' : 'Vez do adversário…';
+  st.textContent = text;
+  $('hint').textContent = hint;
+
+  const mine = isMine();
+  $('bDraw').hidden = $('bTake').hidden = !(mine && G.phase === 'draw');
+  $('bMeld').hidden = $('bDisc').hidden = !(mine && G.phase === 'play');
+  $('bNext').hidden = !(G && G.over);
+  $('bSort').textContent = sortMode === 'rank' ? '⇅ Valor' : '⇅ Naipe';
+  layoutFans();
+  updateSelUI();
+}
+
+// destaques que dependem da seleção (sem redesenhar a mesa)
+function updateSelUI() {
+  document.querySelectorAll('#myHand .card').forEach(el => el.classList.toggle('sel', sel.has(+el.dataset.cid)));
+  const can = G && canAct();
+  const me = viewer(), cards = [...sel];
+  const play = can && G.phase === 'play', draw = can && G.phase === 'draw';
+  document.querySelectorAll('#myMelds .meld').forEach(el =>
+    el.classList.toggle('can-add', !!(play && cards.length && valid(G, me, { t: 'meld', r: +el.dataset.r, cards }))));
+  $('bMeld').disabled = !(play && cards.length);
+  $('bDisc').disabled = !(play && cards.length === 1);
+  $('bTake').disabled = !(draw && G.discard.length);
+  $('bDraw').disabled = !draw;
+  $('lixo').classList.toggle('can-take', !!(draw && takeAction()));
+  $('lixo').classList.toggle('can-drop', !!(play && cards.length === 1));
+  $('stockPile').classList.toggle('can-take', !!draw);
+}
+
+// pegar o lixo: usa a seleção; sem seleção, escolhe as cartas sozinho
+function takeAction() {
+  const me = viewer(), P = G.pl[me];
+  if (sel.size) { const a = { t: 'take', cards: [...sel] }; return valid(G, me, a) ? a : null; }
+  if (lixoBlock(G)) return null;
+  const r = rk(G.discard[G.discard.length - 1]);
+  const nat = P.hand.filter(c => !isWild(c) && rk(c) === r), w = P.hand.filter(isWild);
+  for (const cards of [[], nat, nat.slice(0, 2), nat.length ? [nat[0], ...w.slice(0, 1)] : []]) {
+    const a = { t: 'take', cards };
+    if (valid(G, me, a)) return a;
+  }
+  return null;
+}
+
+function onTake() {
+  if (!canAct() || G.phase !== 'draw') return;
+  const a = takeAction();
+  if (a) doAct(viewer(), a);
+  else flash(act(G, viewer(), { t: 'take', cards: [...sel] }).err || 'Não dá para pegar o lixo agora.', 'err');
+}
+function onDiscard() {
+  if (!canAct() || G.phase !== 'play') return;
+  if (sel.size !== 1) return flash('Selecione uma carta para descartar.', 'err');
+  doAct(viewer(), { t: 'discard', c: [...sel][0] });
+}
+
+function showEnd() {
+  if (!G || !G.over) return;
+  const me = viewer(), op = 1 - me, s = G.over.score;
+  const res = matchResult();
+  $('mTitle').textContent = res === 2 ? 'Empate!' : res >= 0 ? `${name(res)} venceu a partida!${res === me || cfg().mode === 'pvp' ? ' 🎉' : ''}` : `Fim da mão ${M.hand}`;
+  $('mText').textContent = G.over.bate != null ? `${name(G.over.bate)} bateu.` : 'O monte acabou sem batida.';
+  const fmt = v => `<span class="${v < 0 ? 'neg' : ''}">${v > 0 ? '+' : ''}${v}</span>`;
+  const rows = [
+    ['Cartas na mesa', x => fmt(x.mesa)],
+    ['Canastras limpas', x => x.limpas ? `${x.limpas} × 200` : '—'],
+    ['Canastras sujas', x => x.sujas ? `${x.sujas} × 100` : '—'],
+    ['3 vermelhos', x => x.red ? fmt(x.red) : '—'],
+    ['Batida', x => x.bat ? fmt(x.bat) : '—'],
+    ['Morto não pego', x => x.morto ? fmt(x.morto) : '—'],
+    ['Cartas na mão', x => x.mao ? fmt(x.mao) : '—'],
+  ];
+  $('mBody').innerHTML = `<table class="sc"><thead><tr><th></th><th>${name(me)}</th><th>${name(op)}</th></tr></thead><tbody>` +
+    rows.map(([l, f]) => `<tr><td>${l}</td><td>${f(s[me])}</td><td>${f(s[op])}</td></tr>`).join('') +
+    `<tr class="tot"><td>Total da mão</td><td>${fmt(s[me].total)}</td><td>${fmt(s[op].total)}</td></tr>` +
+    `<tr class="gt"><td>Placar</td><td>${M.scores[me]}</td><td>${M.scores[op]}</td></tr></tbody></table>`;
+  const guest = cfg().mode === 'online' && net && net.role === 'guest';
+  $('mBtn').textContent = res !== -1 ? 'Nova partida' : (guest ? 'Pedir próxima mão' : 'Próxima mão');
+  $('modal').classList.add('show');
+  if (res >= 0 && res < 2 && (res === me || cfg().mode === 'pvp')) confetti();
+}
+
+function confetti() {
+  const colors = ['#f2b84b', '#e85d75', '#4fc3f7', '#81c784', '#fff'];
+  for (let i = 0; i < 90; i++) {
+    const d = document.createElement('div');
+    d.className = 'confetti';
+    d.style.left = Math.random() * 100 + 'vw';
+    d.style.background = colors[i % colors.length];
+    document.body.appendChild(d);
+    const a = d.animate([
+      { transform: `translate(0, 0) rotate(0deg)` },
+      { transform: `translate(${(Math.random() - .5) * 200}px, ${innerHeight + 40}px) rotate(${Math.random() * 900}deg)` },
+    ], { duration: 2200 + Math.random() * 1800, delay: Math.random() * 600, easing: 'cubic-bezier(.3,.6,.6,1)' });
+    a.finished.then(() => d.remove()).catch(() => d.remove());
+  }
+}
+
+// ===== Online (P2P via PeerJS) =====
+let net = null; // { peer, conn, me: 0 | 1, role: 'host' | 'guest' }
+
+const netSend = o => { if (net && net.conn && net.conn.open) net.conn.send(o); };
+const setNetStatus = t => { $('netStatus').textContent = t; };
+
+function hostDeal(reset) {
+  if (reset || !M) M = freshMatch(); else advanceMatch();
+  const seed = randSeed();
+  netSend({ t: 'deal', seed, M });
+  beginHand(seed);
+}
+
+// processa as jogadas recebidas uma por vez, depois de cada animação
+function pump() {
+  if (busy || !netQ.length || !G || !net) return;
+  const a = netQ.shift();
+  if (G.over || G.turn === net.me || !doAct(G.turn, a, true)) pump();
+}
+
+// chat: textContent evita injeção de HTML vindo do adversário
+function addChat(kind, text) {
+  const log = $('chatLog');
+  const div = document.createElement('div');
+  div.className = 'msg ' + kind;
+  div.textContent = (kind === 'me' ? 'Você: ' : kind === 'them' ? 'Adversário: ' : '') + text;
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
+}
+
+// aviso de mensagem nova perto da mesa (só quando o chat não está visível)
+let unread = 0, toastTimer;
+const chatInView = () => {
+  const r = $('chat').getBoundingClientRect();
+  return !document.hidden && !$('chat').hidden && r.top < innerHeight && r.bottom > 0;
+};
+function notifyChat(text) {
+  unread++;
+  $('chatToast').textContent = unread > 1 ? `💬 ${unread} mensagens novas`
+    : '💬 ' + text.slice(0, 50) + (text.length > 50 ? '…' : '');
+  $('chatToast').hidden = false;
+  document.title = `(${unread}) Tranca`;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { $('chatToast').hidden = true; }, 8000);
+}
+function clearUnread() {
+  unread = 0;
+  $('chatToast').hidden = true;
+  document.title = 'Tranca';
+}
+const checkRead = () => { if (unread && chatInView()) clearUnread(); };
+['scroll', 'focus', 'visibilitychange', 'resize'].forEach(ev => (ev === 'visibilitychange' ? document : window).addEventListener(ev, checkRead, { passive: true }));
+$('chatToast').addEventListener('click', () => {
+  clearUnread();
+  $('chat').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  $('chatInput').focus({ preventScroll: true });
+});
+
+function closeNet() {
+  clearUnread();
+  $('chatLog').innerHTML = '';
+  netQ = [];
+  if (net) {
+    try { net.conn && net.conn.close(); } catch (e) {}
+    try { net.peer && net.peer.destroy(); } catch (e) {}
+    net = null;
+  }
+  setNetStatus('');
+  $('roomBox').hidden = true;
+}
+
+// STUN descobre o endereço público; TURN retransmite quando a rede (ex.: 5G da operadora,
+// Wi-Fi corporativo) impede a conexão direta. O TURN público abaixo é "melhor esforço" e pode
+// falhar ou ficar lento: para algo confiável, crie uma conta gratuita (ex.: metered.ca) e troque.
+const PEER_CONFIG = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:global.stun.twilio.com:3478' },
+    { urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:443', 'turns:openrelay.metered.ca:443?transport=tcp'],
+      username: 'openrelayproject', credential: 'openrelayproject' },
+  ],
+};
+
+function newPeer(id) {
+  if (typeof Peer === 'undefined') {
+    setNetStatus('Não foi possível carregar o módulo online (verifique a internet).');
+    return null;
+  }
+  const peer = id ? new Peer(id, { config: PEER_CONFIG }) : new Peer({ config: PEER_CONFIG });
+  peer.on('error', e => {
+    if (net) net.err = true;
+    const msgs = {
+      'peer-unavailable': 'Sala não encontrada. O anfitrião precisa estar com a página aberta (e não recarregar). Peça um link novo.',
+      'network': 'Sem acesso ao servidor de conexão. Verifique a internet.',
+      'server-error': 'Servidor de conexão indisponível. Tente de novo em instantes.',
+      'socket-error': 'Servidor de conexão indisponível. Tente de novo em instantes.',
+      'unavailable-id': 'Esta sala já está em uso. Gere um novo link.',
+    };
+    setNetStatus(msgs[e.type] || 'Erro de conexão: ' + (e.type || e));
+    render();
+  });
+  // celular que bloqueia/suspende a página perde o servidor de sinalização: reconecta
+  peer.on('disconnected', () => { if (!peer.destroyed) { try { peer.reconnect(); } catch (e) {} } });
+  return peer;
+}
+
+function bindConn(c) {
+  net.conn = c;
+  const opened = () => {
+    setNetStatus('Conectado!');
+    addChat('sys', 'Conectado. Bom jogo!');
+    if (net.role === 'host') { c.send({ t: 'hello' }); hostDeal(true); }
+    render();
+  };
+  c.on('open', opened);
+  if (c.open) opened();
+  // se a negociação de rede falhar de vez, diz o motivo em vez de ficar "conectando"
+  const watchIce = () => {
+    const pc = c.peerConnection;
+    if (!pc) return setTimeout(watchIce, 200);
+    pc.addEventListener('iceconnectionstatechange', () => {
+      if (pc.iceConnectionState === 'failed' && !c.open && net) {
+        net.err = true;
+        setNetStatus('Não foi possível abrir a conexão entre os aparelhos: a rede (operadora, firewall ou Wi-Fi) bloqueia. Tente trocar de rede (Wi-Fi ↔ 4G/5G) ou use outro aparelho.');
+        render();
+      }
+    });
+  };
+  watchIce();
+  c.on('data', onNetData);
+  c.on('close', () => { setNetStatus('O adversário desconectou.'); addChat('sys', 'O adversário desconectou.'); render(); });
+}
+
+function createRoom() {
+  closeNet();
+  const id = 'tranca-' + Math.random().toString(36).slice(2, 10);
+  const peer = newPeer(id);
+  if (!peer) return;
+  net = { peer, conn: null, me: 0, role: 'host' };
+  setNetStatus('Criando sala…');
+  token++; G = null; M = null; logLines = [];
+  render();
+  peer.on('open', () => {
+    $('roomLink').value = location.href.split('#')[0] + '#sala=' + id;
+    $('roomBox').hidden = false;
+    setNetStatus(location.protocol === 'file:'
+      ? 'Atenção: o jogo precisa estar hospedado na internet para o link funcionar em outro computador.'
+      : 'Aguardando o adversário abrir o link…');
+    render();
+  });
+  peer.on('connection', c => {
+    if (net.conn && net.conn.open) { c.close(); return; } // sala já tem 2 jogadores
+    bindConn(c);
+  });
+}
+
+function joinRoom(id) {
+  closeNet();
+  const peer = newPeer();
+  if (!peer) return;
+  net = { peer, conn: null, me: 1, role: 'guest' };
+  setNetStatus('Conectando…');
+  peer.on('open', () => bindConn(peer.connect(id, { reliable: true })));
+  setTimeout(() => {
+    // só usa a mensagem genérica se nenhum erro mais específico apareceu
+    if (net && net.peer === peer && !net.err && !(net.conn && net.conn.open)) {
+      net.err = true;
+      setNetStatus('Demorou demais para conectar. Confira se o anfitrião está com a página aberta; se estiver, a rede pode estar bloqueando a conexão direta.');
+      render();
+    }
+  }, 20000);
+  render();
+}
+
+function onNetData(d) {
+  if (!d || typeof d !== 'object') return;
+  if (d.t === 'deal' && net.role === 'guest') {
+    const m = d.M || {};
+    const num = v => Number.isFinite(+v) ? +v : 0;
+    if (!Number.isFinite(+d.seed)) return;
+    M = { target: num(m.target), scores: [num(m.scores && m.scores[0]), num(m.scores && m.scores[1])],
+          hand: num(m.hand) || 1, starter: m.starter === 1 ? 1 : 0, scored: false };
+    beginHand(+d.seed);
+  } else if (d.t === 'req' && net.role === 'host') {
+    if (d.w === 'next' && M && G && G.over && matchResult() === -1) hostDeal(false);
+    else if (d.w === 'new' || matchResult() !== -1) { hostDeal(true); addChat('sys', 'O adversário começou uma nova partida.'); }
+  } else if (d.t === 'act') {
+    netQ.push(d.a);
+    pump();
+  } else if (d.t === 'chat') {
+    const text = String(d.text).slice(0, 300);
+    addChat('them', text);
+    if (!chatInView()) notifyChat(text);
+  }
+}
+
+// ===== Eventos =====
+$('myHand').addEventListener('click', e => {
+  const el = e.target.closest('.card');
+  if (!el || !G) return;
+  const id = +el.dataset.cid;
+  sel.has(id) ? sel.delete(id) : sel.add(id);
+  updateSelUI();
+});
+$('myHand').addEventListener('dblclick', e => {
+  const el = e.target.closest('.card');
+  if (!el || !canAct() || G.phase !== 'play') return;
+  sel = new Set([+el.dataset.cid]);
+  onDiscard();
+});
+$('myMelds').addEventListener('click', e => {
+  const el = e.target.closest('.meld');
+  if (!el || !canAct() || G.phase !== 'play') return;
+  if (!sel.size) return flash('Selecione na mão as cartas para completar este jogo.', 'err');
+  doAct(viewer(), { t: 'meld', r: +el.dataset.r, cards: [...sel] });
+});
+$('stockPile').addEventListener('click', () => { if (canAct() && G.phase === 'draw') doAct(viewer(), { t: 'draw' }); });
+$('lixo').addEventListener('click', () => {
+  if (!canAct()) return;
+  if (G.phase === 'draw') onTake();
+  else if (sel.size === 1) onDiscard();
+});
+$('bDraw').addEventListener('click', () => { if (canAct()) doAct(viewer(), { t: 'draw' }); });
+$('bTake').addEventListener('click', onTake);
+$('bMeld').addEventListener('click', () => { if (canAct()) doAct(viewer(), { t: 'meld', cards: [...sel] }); });
+$('bDisc').addEventListener('click', onDiscard);
+$('bNext').addEventListener('click', showEnd);
+$('bSort').addEventListener('click', () => {
+  sortMode = sortMode === 'rank' ? 'suit' : 'rank';
+  const prev = captureRects();
+  render();
+  playFlip(prev, new Map(), 0);
+});
+$('cover').addEventListener('click', () => {
+  if (!G) return;
+  pvView = G.turn;
+  sel.clear();
+  if (dealPending) animateDeal(); else render();
+});
+$('mBtn').addEventListener('click', () => { if (matchResult() !== -1) newMatch(); else nextHand(); });
+$('mView').addEventListener('click', () => $('modal').classList.remove('show'));
+$('new').addEventListener('click', newMatch);
+$('mode').addEventListener('change', () => { closeNet(); newMatch(); });
+$('target').addEventListener('change', () => { if (!(cfg().mode === 'online' && net)) newMatch(); });
+$('level').addEventListener('change', render);
+$('createRoom').addEventListener('click', createRoom);
+$('chatForm').addEventListener('submit', e => {
+  e.preventDefault();
+  const text = $('chatInput').value.trim().slice(0, 300);
+  if (!text || !connected()) return;
+  netSend({ t: 'chat', text });
+  addChat('me', text);
+  $('chatInput').value = '';
+});
+$('copyLink').addEventListener('click', async () => {
+  const inp = $('roomLink');
+  try { await navigator.clipboard.writeText(inp.value); }
+  catch (e) { inp.select(); document.execCommand('copy'); }
+  $('copyLink').textContent = 'Copiado!';
+  setTimeout(() => { $('copyLink').textContent = 'Copiar link'; }, 1500);
+});
+let resizeT;
+window.addEventListener('resize', () => { clearTimeout(resizeT); resizeT = setTimeout(layoutFans, 80); });
+
+// entrou por um link de convite: #sala=ID
+const invite = location.hash.match(/sala=([\w-]+)/);
+if (invite) $('mode').value = 'online';
+newMatch();
+if (invite) joinRoom(invite[1]);
+</script>
+</body>
+</html>
