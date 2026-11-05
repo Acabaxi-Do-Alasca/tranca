@@ -345,8 +345,9 @@
         <ul>
           <li>2 baralhos (104 cartas). Cada jogador recebe <b>11 cartas</b> e há <b>2 mortos</b> de 11.</li>
           <li>Na sua vez: <b>compre</b> do monte ou <b>pegue o lixo</b>, baixe jogos e <b>descarte</b> uma carta.</li>
-          <li>Jogo = 3 ou mais cartas do <b>mesmo valor</b> (naipes livres). O <b>2 é curinga</b>: no máximo um por jogo.</li>
-          <li>Para pegar o lixo, a carta do topo precisa entrar num jogo na hora (com 2 cartas da mão ou num jogo seu já baixado). Você leva o lixo inteiro.</li>
+          <li>Jogos: <b>trinca</b> (3 ou mais cartas do mesmo valor, naipes livres) ou <b>sequência</b> (3 ou mais cartas seguidas do mesmo naipe; o Ás vale antes do 2 ou depois do K). O 3 não entra em sequência.</li>
+          <li>O <b>2 é curinga</b>: no máximo um por jogo. Numa sequência, o 2 do próprio naipe na posição dele conta como carta natural.</li>
+          <li>Para pegar o lixo, a carta do topo precisa entrar num jogo na hora (com 2 cartas da mão ou num jogo seu já baixado). Você leva o lixo inteiro. Dica: selecione as cartas e toque no lixo.</li>
           <li><b>3 preto</b> descartado <b>tranca o lixo</b>. 3 pretos só podem ser baixados na batida.</li>
           <li><b>3 vermelho</b> vai direto para a mesa e você compra outra carta: +100 se tiver canastra, −100 se não tiver.</li>
           <li><b>Canastra</b>: 7 cartas ou mais. Limpa (sem curinga) +200, suja +100. Não é permitido sujar uma canastra limpa.</li>
@@ -385,7 +386,7 @@ const cardVal = c => { const r = rk(c); return r === 1 ? 15 : r === 2 ? 10 : r <
 const cardName = c => RL[rk(c)] + SU[st(c)];
 const rankOrder = r => (r === 1 ? 14 : r === 2 ? 15 : r); // 3..K, A, curingas no fim
 const isCanastra = m => m.c.length >= 7;
-const isClean = m => !m.c.some(isWild);
+const isClean = m => !m.w; // w = curingas usados no jogo
 const clone = o => JSON.parse(JSON.stringify(o));
 
 // gerador pseudoaleatório com semente: os dois aparelhos embaralham igual no online
@@ -405,7 +406,7 @@ function deal(seed, starter) {
   const deck = [...Array(104).keys()];
   for (let i = deck.length - 1; i > 0; i--) { const j = Math.floor(R() * (i + 1)); [deck[i], deck[j]] = [deck[j], deck[i]]; }
   const G = {
-    stock: [], discard: [], mortos: [], turn: starter, phase: 'draw', over: null,
+    stock: [], discard: [], mortos: [], turn: starter, phase: 'draw', over: null, mid: 1,
     pl: [0, 1].map(() => ({ hand: [], melds: [], red3: [], morto: false, disc: [], took: [] })),
   };
   for (let k = 0; k < 11; k++) for (const p of [starter, 1 - starter]) G.pl[p].hand.push(deck.pop());
@@ -457,32 +458,116 @@ function lixoBlock(G) {
   return null;
 }
 
+// trinca: 3 ou mais cartas do mesmo valor
 function meldErr(r, cards) {
   const nat = cards.filter(c => !isWild(c)), w = cards.length - nat.length;
-  if (nat.some(c => rk(c) !== r)) return 'Um jogo só pode ter cartas do mesmo valor (o 2 é curinga).';
+  if (nat.some(c => rk(c) !== r)) return 'Uma trinca só pode ter cartas do mesmo valor (o 2 é curinga).';
   if (w > 1) return 'Cada jogo pode ter no máximo um curinga.';
   if (cards.length < 3) return 'Um jogo precisa de pelo menos 3 cartas.';
   if (r === 3 && w) return 'O jogo de 3 pretos não aceita curinga.';
   return null;
 }
 
+// sequência: 3 ou mais cartas seguidas do mesmo naipe. O Ás vale antes do 2 ou depois do K;
+// o 2 do próprio naipe na posição dele é natural, qualquer outro 2 é curinga (máximo um).
+function seqLayout(cards) {
+  const twos = cards.filter(isWild), others = cards.filter(c => !isWild(c));
+  if (!others.length) return { err: 'Um jogo precisa de cartas naturais, não só curingas.' };
+  const s = st(others[0]);
+  if (others.some(c => st(c) !== s)) return { err: 'A sequência deve ter cartas do mesmo naipe (o 2 é curinga).' };
+  if (others.some(c => rk(c) === 3)) return { err: 'O 3 não entra em sequência.' };
+  if (cards.length < 3) return { err: 'Um jogo precisa de pelo menos 3 cartas.' };
+  const natTwo = twos.find(c => st(c) === s);
+  if (twos.length - (natTwo != null ? 1 : 0) > 1) return { err: 'Cada jogo pode ter no máximo um curinga.' };
+  let best = null;
+  for (const useNat of natTwo != null ? [true, false] : [false]) {
+    const wild = useNat ? twos.filter(c => c !== natTwo) : twos;
+    if (wild.length > 1) continue;
+    const nat = useNat ? [...others, natTwo] : others;
+    for (const aceHigh of [false, true]) {
+      const pos = c => (rk(c) === 1 && aceHigh ? 14 : rk(c));
+      const ps = nat.map(pos);
+      if (new Set(ps).size !== ps.length) continue;
+      const lo = Math.min(...ps), hi = Math.max(...ps);
+      const gaps = hi - lo + 1 - ps.length;
+      if (gaps > wild.length) continue;
+      let wpos = null;
+      if (wild.length) {
+        if (gaps) { for (let x = lo; x <= hi; x++) if (!ps.includes(x)) wpos = x; }
+        else wpos = hi < 14 ? hi + 1 : lo - 1;
+      }
+      const order = nat.map(c => [pos(c), c]);
+      if (wild.length) order.push([wpos, wild[0]]);
+      order.sort((a, b) => a[0] - b[0]);
+      const cand = { s, c: order.map(x => x[1]), w: wild.length };
+      if (!best || cand.w < best.w) best = cand;
+    }
+  }
+  return best || { err: 'Essas cartas não formam uma sequência do mesmo naipe.' };
+}
+
 const sortMeld = cards => cards.slice().sort((a, b) => (isWild(a) - isWild(b)) || (st(a) - st(b)));
 
-// cria um jogo novo ou completa o jogo daquele valor; extra = carta vinda do lixo
-function putMeld(G, p, r, handCards, extra, ev) {
-  const P = G.pl[p];
-  let m = P.melds.find(x => x.r === r);
-  const before = m ? m.c : [];
-  const all = [...before, ...extra, ...handCards];
-  const e = meldErr(r, all);
-  if (e) return e;
-  if (m && isCanastra(m) && isClean(m) && !all.every(c => !isWild(c))) return 'Não é permitido sujar uma canastra limpa.';
+// monta um jogo novo: trinca se as naturais têm o mesmo valor, senão sequência
+function newMeldFrom(cards) {
+  const nat = cards.filter(c => !isWild(c));
+  const sameRank = nat.length && nat.every(c => rk(c) === rk(nat[0]));
+  if (sameRank) {
+    const e = meldErr(rk(nat[0]), cards);
+    if (!e) return { k: 'set', r: rk(nat[0]), c: sortMeld(cards), w: cards.length - nat.length };
+    const q = seqLayout(cards);
+    return q.err ? { err: e } : { k: 'seq', ...q };
+  }
+  const q = seqLayout(cards);
+  return q.err ? q : { k: 'seq', ...q };
+}
+
+// junta cartas a um jogo já baixado (a sequência se reorganiza, o curinga pode mudar de lugar)
+function grow(m, add) {
+  const all = [...m.c, ...add];
+  if (m.k === 'set') {
+    const e = meldErr(m.r, all);
+    return e ? { err: e } : { ...m, c: sortMeld(all), w: all.filter(isWild).length };
+  }
+  const q = seqLayout(all);
+  if (q.err || q.s !== m.s) return { err: q.err || 'A sequência deve ter cartas do mesmo naipe.' };
+  return { ...m, c: q.c, w: q.w };
+}
+
+const meldKey = m => (m.k === 'set' ? rankOrder(m.r) : 100 + m.s * 20 + rk(m.c.find(c => !isWild(c))));
+const meldDesc = m => (m.k === 'set' ? `trinca de ${RL[m.r]}` : `sequência de ${SU[m.s]}`);
+
+// coloca as cartas no jogo `mid` (ou num jogo novo, se mid for null); extra = carta vinda do lixo.
+// Só altera o estado se der certo.
+function putMeld(G, p, mid, handCards, extra, ev) {
+  const P = G.pl[p], cards = [...extra, ...handCards];
+  let m = mid != null ? P.melds.find(x => x.id === mid) : null;
+  if (mid != null && !m) return 'Jogo inválido.';
+  let res = m ? grow(m, cards) : newMeldFrom(cards);
+  if (!m && !res.err && res.k === 'set') {
+    // já existe trinca desse valor: as cartas vão para ela
+    const ex = P.melds.find(x => x.k === 'set' && x.r === res.r);
+    if (ex) { m = ex; res = grow(ex, cards); }
+  }
+  if (res.err) return res.err;
+  const before = m ? m.c.length : 0;
+  if (m && before >= 7 && !m.w && res.w) return 'Não é permitido sujar uma canastra limpa.';
   P.hand = P.hand.filter(c => !handCards.includes(c));
-  if (m) m.c = sortMeld(all);
-  else { m = { r, c: sortMeld(all) }; P.melds.push(m); P.melds.sort((a, b) => rankOrder(a.r) - rankOrder(b.r)); }
-  ev.push({ k: before.length ? 'add' : 'meld', p, r, n: extra.length + handCards.length });
-  if (before.length < 7 && all.length >= 7) ev.push({ k: 'canastra', p, r, clean: isClean(m) });
+  if (m) Object.assign(m, res);
+  else { m = { ...res, id: G.mid++ }; P.melds.push(m); }
+  P.melds.sort((a, b) => meldKey(a) - meldKey(b));
+  ev.push({ k: before ? 'add' : 'meld', p, id: m.id, d: meldDesc(m), n: cards.length });
+  if (before < 7 && m.c.length >= 7) ev.push({ k: 'canastra', p, id: m.id, d: meldDesc(m), clean: !m.w });
   return null;
+}
+
+// sem jogo escolhido: tenta um jogo novo e depois cada jogo já baixado
+function putAny(G, p, mid, handCards, extra, ev) {
+  if (mid != null) return putMeld(G, p, mid, handCards, extra, ev);
+  const first = putMeld(G, p, null, handCards, extra, ev);
+  if (!first) return null;
+  for (const m of G.pl[p].melds) if (!putMeld(G, p, m.id, handCards, extra, ev)) return null;
+  return first;
 }
 
 // depois de baixar: mão vazia pega o morto ou bate; nunca pode ficar travado sem descarte
@@ -517,7 +602,7 @@ function endHand(G, bate) {
 }
 
 // aplica uma ação; devolve { G, ev } com o novo estado ou { err }
-// ações: {t:'draw'} | {t:'take', cards} | {t:'meld', cards, r?} | {t:'discard', c}
+// ações: {t:'draw'} | {t:'take', cards, m?} | {t:'meld', cards, m?} | {t:'discard', c}   (m = id do jogo)
 function act(G0, p, a) {
   const fail = err => ({ err });
   if (!G0 || G0.over) return fail('A mão já terminou.');
@@ -526,6 +611,7 @@ function act(G0, p, a) {
   const G = clone(G0), P = G.pl[p], ev = [];
   const cards = Array.isArray(a.cards) ? a.cards.map(Number) : [];
   if (new Set(cards).size !== cards.length || cards.some(c => !P.hand.includes(c))) return fail('Cartas inválidas.');
+  const mid = a.m != null ? Number(a.m) : null;
 
   if (a.t === 'draw') {
     if (G.phase !== 'draw') return fail('Você já comprou nesta vez.');
@@ -537,12 +623,11 @@ function act(G0, p, a) {
     if (G.phase !== 'draw') return fail('Você já comprou nesta vez.');
     const b = lixoBlock(G);
     if (b) return fail(b);
-    const top = G.discard[G.discard.length - 1], r = rk(top);
-    if (!P.melds.some(m => m.r === r) && cards.length < 2)
-      return fail(`Para pegar o lixo, selecione na mão as cartas que formam jogo com o ${cardName(top)}.`);
+    const top = G.discard[G.discard.length - 1];
     ev.push({ k: 'take', p, n: G.discard.length });
-    const e = putMeld(G, p, r, cards, [top], ev);
-    if (e) return fail(e);
+    const e = putAny(G, p, mid, cards, [top], ev);
+    if (e) return fail(cards.length || mid != null ? e
+      : `Para pegar o lixo, selecione na mão as cartas que formam jogo com o ${cardName(top)}.`);
     G.discard.pop();
     P.took.push(...G.discard.map(rk));
     P.hand.push(...G.discard);
@@ -554,12 +639,9 @@ function act(G0, p, a) {
   } else if (a.t === 'meld') {
     if (G.phase !== 'play') return fail('Primeiro compre do monte ou pegue o lixo.');
     if (!cards.length) return fail('Selecione as cartas do jogo.');
-    const nat = cards.filter(c => !isWild(c));
-    const r = a.r != null ? Number(a.r) : (nat.length ? rk(nat[0]) : 0);
-    if (!r || r === 2) return fail('Um jogo precisa de cartas naturais, não só curingas.');
-    const e = putMeld(G, p, r, cards, [], ev);
+    const e = putAny(G, p, mid, cards, [], ev);
     if (e) return fail(e);
-    const e2 = afterPlay(G, p, ev, r === 3);
+    const e2 = afterPlay(G, p, ev, cards.some(isBlack3));
     if (e2) return fail(e2);
 
   } else if (a.t === 'discard') {
@@ -588,22 +670,51 @@ function act(G0, p, a) {
 // ===== IA =====
 const valid = (G, p, a) => !act(G, p, a).err;
 
+// formas de pegar o lixo: num jogo já baixado ou com 2 cartas da mão (sem curinga primeiro)
+function takeOptions(G, p) {
+  if (G.phase !== 'draw' || lixoBlock(G)) return [];
+  const H = G.pl[p].hand, top = G.discard[G.discard.length - 1];
+  const out = [];
+  if (valid(G, p, { t: 'take', cards: [] })) out.push({ cards: [], wild: false });
+  const same = H.filter(c => !isWild(c) && rk(c) === rk(top));
+  if (same.length > 2 && valid(G, p, { t: 'take', cards: same })) out.push({ cards: same, wild: false });
+  const pairs = [];
+  for (let i = 0; i < H.length; i++) for (let j = i + 1; j < H.length; j++) {
+    const cards = [H[i], H[j]], wild = cards.some(isWild);
+    // só pares que podem fazer jogo com o topo (mesmo valor ou mesmo naipe por perto)
+    const near = c => isWild(c) || rk(c) === rk(top) || st(c) === st(top);
+    if (!near(H[i]) || !near(H[j])) continue;
+    if (valid(G, p, { t: 'take', cards })) pairs.push({ cards, wild });
+  }
+  pairs.sort((a, b) => a.wild - b.wild);
+  return out.concat(pairs);
+}
+
+// corridas de cartas seguidas do mesmo naipe na mão (sem 3 e sem curinga)
+function handRuns(hand) {
+  const runs = [];
+  for (let s = 0; s < 4; s++) {
+    const byPos = new Map();
+    for (const c of hand) if (st(c) === s && !isWild(c) && rk(c) !== 3) {
+      if (!byPos.has(rk(c))) byPos.set(rk(c), c);
+      if (rk(c) === 1 && !byPos.has(14)) byPos.set(14, c);
+    }
+    let cur = [];
+    for (let x = 1; x <= 15; x++) {
+      if (byPos.has(x) && !(x === 14 && cur.includes(byPos.get(14)))) cur.push(byPos.get(x));
+      else { if (cur.length >= 2) runs.push(cur); cur = []; }
+    }
+  }
+  return runs;
+}
+
 function aiNext(G, p, level) {
   const P = G.pl[p];
   if (G.phase === 'draw') {
-    if (!lixoBlock(G)) {
-      const r = rk(G.discard[G.discard.length - 1]);
-      const nat = P.hand.filter(c => !isWild(c) && rk(c) === r), w = P.hand.filter(isWild);
-      const opts = [];
-      if (P.melds.some(m => m.r === r)) opts.push({ cards: nat, wild: false }, { cards: [], wild: false });
-      if (nat.length >= 2) opts.push({ cards: nat, wild: false }, { cards: nat.slice(0, 2), wild: false });
-      if (nat.length === 1 && w.length) opts.push({ cards: [nat[0], w[0]], wild: true });
-      const n = G.discard.length;
-      for (const o of opts) {
-        const want = level === 1 ? (!o.wild && Math.random() < .6) : (!o.wild || n >= (level === 3 ? 4 : 6));
-        const a = { t: 'take', cards: o.cards };
-        if (want && valid(G, p, a)) return a;
-      }
+    const n = G.discard.length;
+    for (const o of takeOptions(G, p)) {
+      const want = level === 1 ? (!o.wild && Math.random() < .6) : (!o.wild || n >= (level === 3 ? 4 : 6));
+      if (want) return { t: 'take', cards: o.cards };
     }
     return { t: 'draw' };
   }
@@ -611,26 +722,37 @@ function aiNext(G, p, level) {
   const byRank = {};
   for (const c of P.hand) if (!isWild(c)) (byRank[rk(c)] = byRank[rk(c)] || []).push(c);
   const wilds = P.hand.filter(isWild);
+  const runs = handRuns(P.hand);
   const cands = [];
-  for (const m of P.melds) if (byRank[m.r]) {
-    cands.push({ t: 'meld', r: m.r, cards: byRank[m.r] });
-    if (byRank[m.r].length > 1) cands.push({ t: 'meld', r: m.r, cards: byRank[m.r].slice(1) });
+  // completar jogos já baixados
+  for (const m of P.melds) {
+    if (m.k === 'set' && byRank[m.r]) {
+      cands.push({ t: 'meld', m: m.id, cards: byRank[m.r] });
+      if (byRank[m.r].length > 1) cands.push({ t: 'meld', m: m.id, cards: byRank[m.r].slice(1) });
+    }
+    if (m.k === 'seq') for (const c of P.hand) if (st(c) === m.s) cands.push({ t: 'meld', m: m.id, cards: [c] });
   }
+  // jogos novos: sequências e trincas sem curinga
+  for (const run of runs) if (run.length >= 3) cands.push({ t: 'meld', cards: run });
   for (const r in byRank) {
-    if (+r !== 3 && byRank[r].length >= 3 && !P.melds.some(m => m.r === +r)) {
+    if (+r !== 3 && byRank[r].length >= 3 && !P.melds.some(m => m.k === 'set' && m.r === +r)) {
       if (level === 1 && Math.random() < .25) continue; // fácil às vezes "esquece" de baixar
       cands.push({ t: 'meld', cards: byRank[r] });
     }
   }
-  if (byRank[3] && byRank[3].length >= 3) cands.push({ t: 'meld', r: 3, cards: byRank[3] });
+  if (byRank[3] && byRank[3].length >= 3) cands.push({ t: 'meld', cards: byRank[3] });
   if (level >= 2 && wilds.length) {
+    const w = wilds[0];
     const hasClean = P.melds.some(m => isCanastra(m) && isClean(m));
     // com a limpa garantida, o curinga ajuda a fechar outra canastra
-    if (hasClean) for (const m of P.melds) if (m.c.length >= 5 && !isCanastra(m) && isClean(m)) cands.push({ t: 'meld', r: m.r, cards: [wilds[0]] });
-    if (P.hand.length >= 7) for (const r in byRank)
-      if (+r !== 3 && byRank[r].length === 2 && !P.melds.some(m => m.r === +r)) cands.push({ t: 'meld', cards: [...byRank[r], wilds[0]] });
+    if (hasClean) for (const m of P.melds) if (m.c.length >= 5 && !isCanastra(m) && isClean(m)) cands.push({ t: 'meld', m: m.id, cards: [w] });
+    if (P.hand.length >= 7) {
+      for (const run of runs) if (run.length === 2) cands.push({ t: 'meld', cards: [...run, w] });
+      for (const r in byRank)
+        if (+r !== 3 && byRank[r].length === 2 && !P.melds.some(m => m.k === 'set' && m.r === +r)) cands.push({ t: 'meld', cards: [...byRank[r], w] });
+    }
     // na hora de bater, o curinga entra em qualquer jogo
-    if (canBater(G, p)) for (const m of P.melds) if (!isCanastra(m) && isClean(m)) cands.push({ t: 'meld', r: m.r, cards: [wilds[0]] });
+    if (canBater(G, p)) for (const m of P.melds) if (!isCanastra(m) && isClean(m)) cands.push({ t: 'meld', m: m.id, cards: [w] });
   }
   for (const a of cands) if (valid(G, p, a)) return a;
   return { t: 'discard', c: chooseDiscard(G, p, level) };
@@ -638,21 +760,23 @@ function aiNext(G, p, level) {
 
 function chooseDiscard(G, p, level) {
   const P = G.pl[p], Q = G.pl[1 - p];
-  const oppRanks = new Set(Q.melds.map(m => m.r));
   const cnt = {};
   for (const c of P.hand) cnt[rk(c)] = (cnt[rk(c)] || 0) + 1;
+  const feeds = c => Q.melds.some(m => !grow(m, [c]).err); // o adversário encaixaria e pegaria o lixo
+  const neighbors = c => P.hand.filter(x => x !== c && !isWild(x) && st(x) === st(c) && rk(c) !== 3 && rk(x) !== 3 &&
+    (Math.abs(rk(x) - rk(c)) <= 2 || rk(x) + rk(c) >= 25)).length;
   const score = c => {
     const r = rk(c);
     if (isWild(c)) return 1000;
     let s = 0;
     if (isBlack3(c)) s -= level >= 2 ? 70 : 0; // tranca o lixo para o adversário
-    else s += (cnt[r] - 1) * 45;               // pares e trincas ficam na mão
-    if (level >= 2 && oppRanks.has(r)) s += 220; // daria o lixo ao adversário
+    else s += (cnt[r] - 1) * 45 + neighbors(c) * 28; // pares e cartas de sequência ficam na mão
+    if (level >= 2 && feeds(c)) s += 220;
     if (level >= 3) {
       if (Q.took.includes(r)) s += 120;          // ele já tem essa carta na mão
       if (Q.disc.slice(-6).includes(r)) s -= 25; // ele descartou: não está juntando
     }
-    if (P.melds.some(m => m.r === r)) s += 30;
+    if (P.melds.some(m => !grow(m, [c]).err)) s += 30;
     s -= cardVal(c) * .6;
     if (level === 1) s += Math.random() * 90;
     return s;
@@ -777,7 +901,7 @@ function commit(r) {
     r.ev.forEach(evToast);
     r.ev.filter(e => e.k === 'canastra').forEach(e => {
       const box = e.p === viewer() ? 'myMelds' : 'oppMelds';
-      const el = document.querySelector(`#${box} .meld[data-r="${e.r}"]`);
+      const el = document.querySelector(`#${box} .meld[data-m="${e.id}"]`);
       if (el) { el.classList.remove('pop'); void el.offsetWidth; el.classList.add('pop'); }
     });
     if (G.over) {
@@ -845,7 +969,9 @@ function playFlip(prev, origins, stagger) {
     const a = el.animate(frames, { duration: FLY_MS, delay, easing: 'cubic-bezier(.25,.8,.25,1)', fill: 'backwards' });
     proms.push(a.finished.catch(() => {}).then(() => { el.style.transformOrigin = ''; el.style.zIndex = ''; }));
   });
-  return Promise.all(proms);
+  // com a aba em segundo plano o navegador congela as animações: não deixa a partida travar esperando
+  const limit = new Promise(r => setTimeout(r, FLY_MS + i * stagger + 300));
+  return Promise.race([Promise.all(proms), limit]);
 }
 
 // avisos no centro da mesa, um de cada vez
@@ -869,7 +995,7 @@ function nextToast() {
 
 function evToast(e) {
   const N = name(e.p);
-  if (e.k === 'canastra') flash(`${e.clean ? '✨ Canastra limpa' : 'Canastra suja'} de ${RL[e.r]}!`, e.clean ? 'gold' : '');
+  if (e.k === 'canastra') flash(`${e.clean ? '✨ Canastra limpa' : 'Canastra suja'}!`, e.clean ? 'gold' : '');
   else if (e.k === 'lock') flash('🔒 Lixo trancado!');
   else if (e.k === 'morto') flash(`${N} pegou o morto`);
   else if (e.k === 'bate') flash(`${N} bateu! 🎉`, 'gold');
@@ -883,14 +1009,14 @@ function evText(e) {
   switch (e.k) {
     case 'draw': return `${N} comprou do monte` + (showCard ? ` (${cardName(e.c)})` : '');
     case 'take': return `${N} pegou o lixo (${e.n} cartas)`;
-    case 'meld': return `${N} baixou um jogo de ${RL[e.r]}`;
-    case 'add': return `${N} completou o jogo de ${RL[e.r]} (+${e.n})`;
+    case 'meld': return `${N} baixou ${e.d}`;
+    case 'add': return `${N} completou a ${e.d} (+${e.n})`;
     case 'discard': return `${N} descartou ${cardName(e.c)}`;
     case 'lock': return '🔒 Lixo trancado pelo 3 preto';
     case 'red3': return `${N} baixou um 3 vermelho (${cardName(e.c)})`;
     case 'morto': return `${N} pegou o morto`;
     case 'mortoStock': return 'O monte acabou: o morto virou monte';
-    case 'canastra': return `${N} fez canastra ${e.clean ? 'limpa' : 'suja'} de ${RL[e.r]}!`;
+    case 'canastra': return `${N} fez canastra ${e.clean ? 'limpa' : 'suja'} (${e.d})!`;
     case 'bate': return `${N} bateu!`;
     case 'end': return 'O monte acabou — fim da mão';
   }
@@ -923,7 +1049,7 @@ function meldsHTML(P) {
   return P.melds.map(m => {
     const can = isCanastra(m), clean = isClean(m);
     const tag = can ? (clean ? 'Limpa' : 'Suja') + ' · ' + m.c.length : m.c.length;
-    return `<div class="meld${can ? (clean ? ' clean' : ' dirty') : ''}" data-r="${m.r}">${m.c.map(c => cardHTML(c)).join('')}<span class="mc">${tag}</span></div>`;
+    return `<div class="meld${can ? (clean ? ' clean' : ' dirty') : ''}" data-m="${m.id}">${m.c.map(c => cardHTML(c)).join('')}<span class="mc">${tag}</span></div>`;
   }).join('');
 }
 
@@ -1035,7 +1161,7 @@ function updateSelUI() {
   const me = viewer(), cards = [...sel];
   const play = can && G.phase === 'play', draw = can && G.phase === 'draw';
   document.querySelectorAll('#myMelds .meld').forEach(el =>
-    el.classList.toggle('can-add', !!(play && cards.length && valid(G, me, { t: 'meld', r: +el.dataset.r, cards }))));
+    el.classList.toggle('can-add', !!(play && cards.length && valid(G, me, { t: 'meld', m: +el.dataset.m, cards }))));
   $('bMeld').disabled = !(play && cards.length);
   $('bDisc').disabled = !(play && cards.length === 1);
   $('bTake').disabled = !(draw && G.discard.length);
@@ -1047,16 +1173,10 @@ function updateSelUI() {
 
 // pegar o lixo: usa a seleção; sem seleção, escolhe as cartas sozinho
 function takeAction() {
-  const me = viewer(), P = G.pl[me];
+  const me = viewer();
   if (sel.size) { const a = { t: 'take', cards: [...sel] }; return valid(G, me, a) ? a : null; }
-  if (lixoBlock(G)) return null;
-  const r = rk(G.discard[G.discard.length - 1]);
-  const nat = P.hand.filter(c => !isWild(c) && rk(c) === r), w = P.hand.filter(isWild);
-  for (const cards of [[], nat, nat.slice(0, 2), nat.length ? [nat[0], ...w.slice(0, 1)] : []]) {
-    const a = { t: 'take', cards };
-    if (valid(G, me, a)) return a;
-  }
-  return null;
+  const o = takeOptions(G, me)[0];
+  return o ? { t: 'take', cards: o.cards } : null;
 }
 
 function onTake() {
@@ -1328,7 +1448,7 @@ $('myMelds').addEventListener('click', e => {
   const el = e.target.closest('.meld');
   if (!el || !canAct() || G.phase !== 'play') return;
   if (!sel.size) return flash('Selecione na mão as cartas para completar este jogo.', 'err');
-  doAct(viewer(), { t: 'meld', r: +el.dataset.r, cards: [...sel] });
+  doAct(viewer(), { t: 'meld', m: +el.dataset.m, cards: [...sel] });
 });
 $('stockPile').addEventListener('click', () => { if (canAct() && G.phase === 'draw') doAct(viewer(), { t: 'draw' }); });
 $('lixo').addEventListener('click', () => {
